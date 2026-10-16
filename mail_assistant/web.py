@@ -14,16 +14,16 @@ from mail_assistant.periods import three_month_period
 from mail_assistant.operation_view import group_operations, operation_summary_rows, operation_table
 from mail_assistant.presentation import (
     CATEGORY_LABELS, KIND_LABELS, OPERATION_LABELS, PAYMENT_LABELS,
-    issues, money_label, preview_summary, review_label, table_rows,
+    issues, money_label, preview_summary, recipient_label, review_label, table_rows,
 )
 from mail_assistant.receipts import confirm_receipt, duplicate_suspects, edit_receipt, reject_receipt
 from mail_assistant.report import report_csv_text
 from mail_assistant.storage import CATEGORIES, OPERATION_TYPES
 
-st.set_page_config(page_title="Чеки и платежи", page_icon="🧾", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Мои расходы", page_icon="🧾", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""<style>
     .block-container {padding-top: 2rem;}
-    [data-testid="stMetricValue"] {font-size: clamp(1.25rem, 4vw, 2rem);}
+    [data-testid="stMetricValue"] {font-size: clamp(1.5rem, 4.5vw, 2.75rem); font-weight: 650;}
     [data-testid="stMetricValue"] > div {white-space: normal; overflow-wrap: anywhere;}
 </style>""", unsafe_allow_html=True)
 load_env_file()
@@ -115,29 +115,15 @@ with svc.open_store() as store:
 duplicate_ids = {int(value) for group in suspects for value in group["receipt_ids"].split(",")}
 active_rows = [row for row in rows if row["review_status"] != "rejected"]
 
-st.title("Чеки и платежи")
-st.caption("Все загруженные файлы видны, даже если AI ещё не распознал платёж. Расходы — в отдельной вкладке.")
+heading, date_left, date_right = st.columns([2, 1, 1])
+heading.title("Мои расходы")
+start = date_left.date_input("С", three_month_period(today)[0], key="period_from")
+end = date_right.date_input("По", today, key="period_to")
 if notice := st.session_state.pop("notice", None):
     st.success(notice)
-top = st.columns(2)
-top[0].metric("Загружено реальных документов", counts['total'])
-top[1].metric("Есть извлечённые поля платежа", counts.get('with_fields', 0))
-st.caption(f"Ожидают AI: {counts.get('waiting', 0)} · без полей из-за HTTP 402: {counts.get('billing', 0)} · "
-           f"без читаемого текста: {counts.get('unreadable', 0)} · другие ошибки: {counts.get('error', 0)} · "
-           f"AI не выделил платежей / прочее: {counts.get('other', 0)}. "
-           f"Из документов с полями без назначения: {counts['without_purpose']}.")
-st.info("Это документы, уже загруженные на компьютер, а не полный перечень чеков в почте. Охват всех папок пока не подтверждён.")
-if billing_paused:
-    st.warning("AI остановлен: провайдер вернул HTTP 402 (оплата/лимит). Исходники и распознанный текст сохранены; новые облачные запросы заблокированы.")
-
 with st.sidebar:
-    st.header("Период расходов")
-    start = st.date_input("С", three_month_period(today)[0], key="period_from")
-    end = st.date_input("По", today, key="period_to")
-    st.caption("По дате покупки или платежа, не по дате письма.")
+    st.header("Настройки")
     scope = st.radio("Показывать", ["Все распознанные", "Только подтверждённые"])
-    st.divider()
-    st.caption("Безопасность: письма только читаются. Оплата, отправка писем и перемещение не выполняются.")
 
 if start > end:
     st.error("Начало периода должно быть раньше окончания.")
@@ -146,54 +132,49 @@ period_rows = [row for row in active_rows if row["purchase_date"] and start.isof
 if scope == "Только подтверждённые":
     period_rows = [row for row in period_rows if row["review_status"] == "confirmed"]
 
-files, overview, review, add, settings_tab = st.tabs(["Все документы", "Расходы", "Проверить записи", "Добавить чеки", "Настройки AI"])
+overview, files, review, add = st.tabs(["Расходы", "Документы", "Проверить записи", "Добавить чеки"])
+settings_tab = st.sidebar.expander("Облачная модель")
 
 with overview:
-    st.subheader("Куда ушли деньги")
-    st.caption(f"{start:%d.%m.%Y} — {end:%d.%m.%Y} · изменить период: кнопка » в левом верхнем углу.")
-    st.markdown("Предварительно: включая непроверенные платежи. Счета без оплаты и возможные дубли исключены.")
     operations, bills = group_operations(period_rows)
     summary = preview_summary(operation_summary_rows(operations), set())
     if not summary:
-        st.info("За этот период нет платежей с полной суммой, валютой и датой. Откройте «Проверить записи» или добавьте чеки.")
+        st.caption("За этот период пока нет распознанных платежей с известной суммой и валютой.")
     for currency, bucket in summary.items():
-        st.markdown(f"### {currency}")
-        metrics = st.columns(2)
-        metrics[0].metric("Расходы", money_label({"amount_minor": bucket['expense'], "currency": currency}))
-        metrics[1].metric("Возвраты", money_label({"amount_minor": bucket['refund'], "currency": currency}))
-        net = money_label({"amount_minor": bucket['expense'] - bucket['refund'], "currency": currency})
-        st.write(f"Чистый отток: **{net}** · платежей: **{bucket['count']}**")
-        if bucket["pending"]:
-            st.caption(f"Из них ещё не подтверждены вами: {bucket['pending']}. Погашение кредита — отток денег, не покупка товара.")
-        left, right = st.columns(2)
-        with left:
-            st.markdown("**Получатели платежей**")
-            st.dataframe([{"Кому": name, "Сумма": money_label({"amount_minor": value, "currency": currency})}
-                          for name, value in sorted(bucket["merchants"].items(), key=lambda pair: -pair[1])], hide_index=True, width="stretch")
-        with right:
-            st.markdown("**По категориям**")
-            st.dataframe([{"Категория": name, "Сумма": money_label({"amount_minor": value, "currency": currency})}
-                          for name, value in sorted(bucket["categories"].items(), key=lambda pair: -pair[1])], hide_index=True, width="stretch")
-    st.markdown("### Платежи и покупки по операциям")
-    st.caption("Несколько документов одной операции показаны внутри неё и не считаются отдельными расходами.")
+        total, payments = st.columns([2, 1])
+        total.metric("Потрачено · " + currency, money_label({"amount_minor": bucket['expense'], "currency": currency}))
+        payments.metric("Платежей", bucket['count'])
+        st.caption("Предварительно · по распознанным платежам. Данные за период пока неполные.")
+        if bucket['refund']:
+            refund = money_label({'amount_minor': bucket['refund'], 'currency': currency})
+            net = money_label({'amount_minor': bucket['expense'] - bucket['refund'], 'currency': currency})
+            st.caption(f"Возвращено {refund} · чистый отток {net}")
+        st.markdown("#### Кому отправлены деньги")
+        st.dataframe(
+            [{"Получатель": name, "Сумма": money_label({"amount_minor": value, "currency": currency})}
+             for name, value in sorted(bucket['merchants'].items(), key=lambda pair: -pair[1])],
+            hide_index=True, width="stretch", height=min(285, 38 + 35 * len(bucket['merchants'])),
+            column_config={"Получатель": st.column_config.TextColumn(width="large"),
+                           "Сумма": st.column_config.TextColumn(width="small")},
+        )
+    st.markdown("#### Все платежи")
     if operations:
-        st.dataframe(operation_table(operations, money_label), hide_index=True, width="stretch")
-        for op in operations:
-            if op["document_count"] > 1:
-                with st.expander(f"{op['recipient']}: документов в операции {op['document_count']}"):
-                    for doc in op["documents"]:
-                        st.write(f"Документ {doc['document_id']} · {doc['review_status']} · {doc['document_kind']}")
+        compact = []
+        for op in sorted(operations, key=lambda item: (item['date'] or '', item['primary_id']), reverse=True):
+            amount = money_label({'amount_minor': op['amount_minor'], 'amount_text': op.get('amount_text'), 'currency': op['currency']})
+            compact.append({'Дата': op['date'], 'Кому': recipient_label(op['recipient']),
+                            'За что': op['purpose'] if op['purpose_known'] else '—', 'Сумма': amount})
+        st.dataframe(compact, hide_index=True, width="stretch", column_order=['Дата', 'Кому', 'Сумма', 'За что'],
+                     column_config={'Дата': st.column_config.TextColumn(width="small"),
+                                    'Кому': st.column_config.TextColumn(width="medium"),
+                                    'Сумма': st.column_config.TextColumn(width="small"),
+                                    'За что': st.column_config.TextColumn(width="medium")})
     else:
-        st.info("За период операций нет.")
+        st.caption("Платежей за выбранный период пока нет.")
     if bills:
-        st.markdown("### Счета без оплаты (не расход)")
-        st.dataframe(operation_table(bills, money_label), hide_index=True, width="stretch")
-    invoices = sum(row["document_kind"] == "invoice" and row["payment_status"] != "paid" for row in period_rows)
-    if invoices:
-        st.info(f"Счетов / начислений без подтверждения оплаты: {invoices}. Они показаны в списке, но не считаются потраченными деньгами.")
-    undated = sum(not row["purchase_date"] for row in active_rows)
-    if undated:
-        st.warning(f"Без даты: {undated}. Они не попали в период; исправьте их во вкладке проверки.")
+        with st.expander(f"Счета без подтверждения оплаты · {len(bills)}"):
+            st.caption("В сумму расходов не включены.")
+            st.dataframe(operation_table(bills, money_label), hide_index=True, width="stretch")
     with svc.open_store() as store:
         report = svc.report_with_pending(store, start.isoformat(), end.isoformat())
     st.download_button("Скачать CSV подтверждённых расходов", report_csv_text(report),
@@ -310,8 +291,10 @@ with add:
         billing_retry = st.checkbox("Я решил вопрос с оплатой/лимитом и разрешаю повторную попытку AI")
     cloud = svc.cloud_status(billing_retry=billing_retry)
     if not cloud.allowed:
-        st.info(cloud.reason)
-    st.caption(f"Готовы к AI: {len(pending)}. Модель: {st.session_state.get('model', selected_model)}. Повторная отрисовка страницы не отправляет запросы.")
+        st.caption("Распознавание временно недоступно. Файлы можно добавлять и просматривать.")
+        with st.expander("Подробности обработки"):
+            st.info(cloud.reason)
+    st.caption(f"Ожидают распознавания: {len(pending)} документов.")
     ids = st.multiselect("Документы для распознавания", [row["id"] for row in pending],
                          default=[row["id"] for row in pending[:3]], format_func=lambda value: f"Документ №{value}")
     if st.button("Распознать новые", disabled=_busy() or not cloud.allowed or not ids):
@@ -320,18 +303,19 @@ with add:
                 results = svc.recognize_documents(store, st.session_state.get("model", selected_model), ids, billing_retry=billing_retry)
             st.session_state["recognition_log"] = [f"Документ №{result.document_id}: " + (f"ошибка {result.error_code}" if result.error_code else "готов") for result in results]
         _action_and_refresh(recognize_action, "Обработка завершена. Результаты — во вкладке проверки.")
-    for line in st.session_state.get("recognition_log", []):
-        st.write(line)
+    if st.session_state.get("recognition_log"):
+        with st.expander("Подробности последнего запуска"):
+            for line in st.session_state['recognition_log']:
+                st.write(line)
 
 with files:
-    st.subheader("Все загруженные чеки, платежи и счета")
-    st.caption("Список не скрывает файлы без даты, суммы или результата AI. Фильтр периода расходов к нему не применяется.")
+    st.subheader("Документы")
+    st.caption(f"Всего {counts['total']} · с извлечёнными данными {counts.get('with_fields', 0)}. Здесь также доступны ещё не распознанные файлы.")
     coverage = svc.saved_mail_coverage()
     if coverage:
         missing = sum(row.get('without_local_source', 0) for row in coverage['folders'])
-        if missing:
-            st.warning(f"В почте ещё {missing} писем-кандидатов без сохранённых вложений. Они пока НЕ загружены в приложение. Кандидат — не обязательно чек; возможны иконки и копии.")
         with st.expander("Охват папок почты — где ещё остались вложения"):
+            st.caption(f"Без сохранённых источников: {missing} писем-кандидатов. Среди вложений могут быть иконки и копии, не только чеки.")
             st.caption(f"Проверка {coverage['checked_at']}. По дате получения: {coverage['received_from']} — {coverage['received_to']}. "
                        "Это число писем с PNG/PDF, а не число уникальных платежей. Наличие одного источника не доказывает импорт всех вложений письма.")
             st.dataframe([{'Папка': row['folder'], 'Писем в периоде': row.get('messages'),
@@ -339,22 +323,26 @@ with files:
                            'Есть сохранённый источник': row.get('with_local_source'),
                            'Ни одного источника не сохранено': row.get('without_local_source'),
                            'Ошибка': row.get('error', '')} for row in coverage['folders']], hide_index=True, width="stretch")
-    groups = {"Все": None, "Есть поля платежа": "with_fields", "Ожидают AI": "waiting",
-              "Остановлены HTTP 402": "billing", "Нет читаемого текста": "unreadable", "Другие ошибки": "error", "Прочее": "other"}
+    groups = {"Все": None, "Есть данные": ('with_fields',), "Ожидают обработки": ('waiting', 'billing'),
+              "Нужна проверка": ('unreadable', 'error'), "Без платежа": ('other',)}
+    state_labels = {'with_fields': 'Есть данные', 'waiting': 'Ожидает обработки', 'billing': 'Ожидает обработки',
+                    'unreadable': 'Нужна проверка', 'error': 'Нужна проверка', 'other': 'Без платежа'}
     group = st.selectbox("Обработка документов", list(groups))
     query = st.text_input("Поиск по получателю, назначению или источнику").strip().casefold()
-    visible = [item for item in library if (groups[group] is None or item['group'] == groups[group])
+    visible = [item for item in library if (groups[group] is None or item['group'] in groups[group])
                and (not query or query in ' '.join((item['filename'], item['recipient'], item['purpose'])).casefold())]
     st.caption(f"Показано {len(visible)} из {len(library)} загруженных документов.")
     if visible:
-        st.dataframe(library_table(visible), hide_index=True, width="stretch",
+        display_documents = library_table(visible)
+        for display_row, item in zip(display_documents, visible):
+            display_row['Обработка'] = state_labels[item['group']]
+        st.dataframe(display_documents, hide_index=True, width="stretch",
                      column_order=["№", "Дата платежа", "Сумма", "Получатель", "Назначение", "Обработка", "Источник"])
         by_document = {item['id']: item for item in visible}
         default_document = next((index for index, item in enumerate(visible) if item['purpose']), 0)
         document_id = st.selectbox("Открыть документ", list(by_document), format_func=lambda value:
-                                   f"№{value} · {by_document[value]['recipient'] or by_document[value]['filename']} · {by_document[value]['state']}", index=default_document)
+                                   f"№{value} · {by_document[value]['recipient'] or by_document[value]['filename']}", index=default_document)
         selected = by_document[document_id]
-        st.write(selected['state'])
         left, right = st.columns(2)
         with left:
             with svc.open_store() as store:
@@ -363,7 +351,7 @@ with files:
         with right:
             st.markdown(f"**Сумма:** {selected['amount']}")
             st.write("Получатель: " + (selected['recipient'] or 'Ещё не распознан'))
-            st.write("Назначение: " + (selected['purpose'] or 'Ещё не распознано — это не означает, что назначения нет в документе'))
+            st.write("Назначение: " + (selected['purpose'] or '—'))
             st.write("Дата платежа: " + (selected['payment_dates'] or 'Ещё не распознана'))
             st.caption("Источники")
             for source in selected['sources']:
@@ -375,6 +363,8 @@ with files:
     else:
         st.info("Документов по этому фильтру нет.")
     with st.expander("Технические подробности"):
+        if billing_paused:
+            st.caption("Облачный провайдер вернул HTTP 402. Обработка приостановлена до решения вопроса с оплатой/лимитом.")
         st.dataframe(documents, hide_index=True, width="stretch")
 
 with settings_tab:

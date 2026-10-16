@@ -48,7 +48,7 @@ def test_page_renders_receipts_and_pending_report_without_actions(web_db, monkey
 
     assert not at.exception
     assert len(at.dataframe) >= 2
-    assert any("Предварительно" in md.value for md in at.markdown)
+    assert any("Предварительно" in caption.value for caption in at.caption)
     assert len(web_db["llm_calls"].calls) == calls_before
 
 
@@ -95,3 +95,12 @@ def test_report_currencies_are_not_summed(web_db):
 
     assert "RUB" not in report["currencies"]
     assert json.dumps(report["pending_rows"], default=str)
+
+
+def test_first_screen_is_money_and_recipients_not_processing_diagnostics(web_db):
+    at = _app().run()
+    assert not at.exception
+    assert at.tabs[0].label == "Расходы"
+    assert any(metric.label == "Потрачено · RUB" and "900,00" in metric.value for metric in at.metric)
+    assert any(metric.label == "Платежей" and str(metric.value) == "1" for metric in at.metric)
+    assert not any(metric.label == "Загружено реальных документов" for metric in at.metric)

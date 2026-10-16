@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from decimal import Decimal
+import re
+import unicodedata
 from typing import Any
 
 from mail_assistant.money import parse_amount
@@ -16,6 +18,23 @@ CATEGORY_LABELS = {
 OPERATION_LABELS = {"expense": "Расход", "refund": "Возврат", "unknown": "Не определено"}
 KIND_LABELS = {"receipt": "Чек покупки", "payment": "Квитанция платежа", "invoice": "Счёт к оплате", "unknown": "Документ"}
 PAYMENT_LABELS = {"paid": "Оплачен", "unpaid": "Не оплачен", "unknown": "Нет подтверждения оплаты"}
+
+
+def recipient_label(name: str) -> str:
+    """Normalise typography/legal-form spelling for display, not transaction deduplication.
+
+    Different legal forms remain different recipients. Original fields are unchanged.
+    """
+    text = ' '.join(unicodedata.normalize('NFKC', name).split())
+    forms = ((r'закрытое акционерное общество|ЗАО', 'ЗАО'),
+             (r'открытое акционерное общество|ОАО', 'ОАО'),
+             (r'общество с ограниченной ответственностью|ООО', 'ООО'))
+    for pattern, short in forms:
+        match = re.match(rf'^(?:{pattern})\b\s*', text, re.I)
+        if match:
+            company = text[match.end():].strip(' «»"“”„\'')
+            return f'{short} «{company}»' if company else short
+    return text
 
 
 def money_label(row: dict[str, Any]) -> str:
@@ -84,16 +103,18 @@ def preview_summary(rows: list[dict[str, Any]], duplicate_ids: set[int]) -> dict
             continue
         if row.get("amount_minor") is None:
             continue
-        code = row["currency"]
-        bucket = grouped.setdefault(code, {"expense": 0, "refund": 0, "count": 0, "pending": 0,
-                                            "merchants": defaultdict(int), "categories": defaultdict(int)})
         kind = row["operation_type"]
         if kind not in ("expense", "refund"):
             continue
+        code = row["currency"]
+        bucket = grouped.setdefault(code, {"expense": 0, "refund": 0, "count": 0, "pending": 0,
+                                            "merchants": defaultdict(int), "categories": defaultdict(int)})
         amount = row["amount_minor"]
         bucket[kind] += amount
         signed = amount if kind == "expense" else -amount
-        bucket["merchants"][row["merchant_name"]] += signed
+        name = recipient_label(row["merchant_name"])
+        merchant = next((existing for existing in bucket["merchants"] if existing.casefold() == name.casefold()), name)
+        bucket["merchants"][merchant] += signed
         bucket["categories"][CATEGORY_LABELS.get(row["category"], row["category"])] += signed
         bucket["count"] += 1
         bucket["pending"] += row["review_status"] != "confirmed"
