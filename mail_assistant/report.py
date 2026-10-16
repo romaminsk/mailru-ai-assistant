@@ -33,11 +33,34 @@ def _bucket() -> dict[str, int]:
     return {"expense": 0, "refund": 0, "count": 0}
 
 
+def outflow_minor(row: dict[str, Any]) -> int | None:
+    """Отток денег: итог списания. Комиссия уже входит в итог и не прибавляется повторно."""
+    value = row.get("debit_minor")
+    return value if value is not None else row.get("amount_minor")
+
+
+def operation_units(rows: list[Any]) -> list[dict[str, Any]]:
+    """Одна строка на финансовую операцию. Документы одной операции не удваивают расход."""
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        data = dict(row)
+        key = f"op:{data['operation_id']}" if data.get("operation_id") else f"rec:{data['id']}"
+        groups[key].append(data)
+    units = []
+    for members in groups.values():
+        primary = next((m for m in members if m.get("is_primary")), None) or min(members, key=lambda m: m["id"])
+        unit = dict(primary)
+        unit["documents"] = len({m["document_id"] for m in members})
+        units.append(unit)
+    return sorted(units, key=lambda u: (u["purchase_date"] or "", u["id"]))
+
+
 def build_report(store: Store, date_from: str, date_to: str) -> dict[str, Any]:
     """Отчёт строится только из БД по дате покупки. Учитываются только подтверждённые записи."""
     start, end = parse_period(date_from, date_to)
     confirmed = store.conn.execute(
         "SELECT r.id, r.merchant_name, r.purchase_date, r.purchase_time, r.currency, r.amount_minor, "
+        "r.debit_minor, r.operation_id, r.is_primary, r.document_id, "
         "r.operation_type, r.category, r.confirmed_with_partial_text, d.sha256 "
         "FROM receipts r "
         "JOIN confirmed_expenses c ON c.receipt_id = r.id "
@@ -57,13 +80,14 @@ def build_report(store: Store, date_from: str, date_to: str) -> dict[str, Any]:
         "AND review_status IN ('extracted', 'needs_review') AND purchase_date IS NULL"
     ).fetchone()[0]
 
+    units = operation_units(confirmed)
     currencies: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"expense": 0, "refund": 0, "count": 0, "merchants": defaultdict(_bucket), "categories": defaultdict(_bucket)}
     )
     partial = 0
-    for row in confirmed:
+    for row in units:
         currency = row["currency"]
-        minor = row["amount_minor"]
+        minor = outflow_minor(row)
         if currency is None or minor is None or row["operation_type"] not in ("expense", "refund"):
             continue
         bucket = currencies[currency]
@@ -94,11 +118,12 @@ def build_report(store: Store, date_from: str, date_to: str) -> dict[str, Any]:
         "period_to": end,
         "basis": "purchase_date",
         "currencies": result_currencies,
-        "confirmed_total": len(confirmed),
+        "confirmed_total": len(units),
+        "confirmed_documents": len(confirmed),
         "confirmed_with_partial_text": partial,
         "pending_in_period": pending_in_period,
         "pending_without_date": pending_undated,
-        "_detail_rows": [dict(row) for row in confirmed],
+        "_detail_rows": [dict(row) for row in units],
     }
 
 

@@ -9,7 +9,7 @@ from typing import Any
 
 from mail_assistant.config import AppError
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 REVIEW_STATUSES = ("extracted", "needs_review", "confirmed", "rejected")
 OPERATION_TYPES = ("expense", "refund", "unknown")
 EDITABLE_COLUMNS = frozenset(
@@ -128,6 +128,38 @@ MIGRATIONS: dict[int, str] = {
     3: """
     ALTER TABLE receipts ADD COLUMN document_kind TEXT NOT NULL DEFAULT 'unknown';
     ALTER TABLE receipts ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'unknown';
+    """,    # Финансовые операции: один платёж или покупка может иметь несколько документов.
+    # Расход учитывается по операции, а не по документу. Связи сохраняют основание и обратимы.
+    4: """
+    ALTER TABLE receipts ADD COLUMN intermediary TEXT;
+    ALTER TABLE receipts ADD COLUMN purpose TEXT;
+    ALTER TABLE receipts ADD COLUMN description TEXT;
+    ALTER TABLE receipts ADD COLUMN fee_minor INTEGER;
+    ALTER TABLE receipts ADD COLUMN debit_minor INTEGER;
+    ALTER TABLE receipts ADD COLUMN identifiers_json TEXT;
+    ALTER TABLE receipts ADD COLUMN operation_id INTEGER REFERENCES operations(id);
+    ALTER TABLE receipts ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE operations (
+        id INTEGER PRIMARY KEY,
+        kind TEXT NOT NULL,
+        amount_minor INTEGER,
+        currency TEXT,
+        operation_date TEXT,
+        recipient TEXT,
+        purpose TEXT,
+        description TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE TABLE operation_links (
+        id INTEGER PRIMARY KEY,
+        receipt_id INTEGER NOT NULL REFERENCES receipts(id),
+        operation_id INTEGER NOT NULL REFERENCES operations(id),
+        basis TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        undone_at TEXT
+    );
+    CREATE INDEX receipts_operation ON receipts(operation_id);
     """,
 }
 
@@ -368,6 +400,18 @@ class Store:
                 self.conn.execute(
                     "UPDATE receipts SET document_kind = ?, payment_status = ? WHERE id = last_insert_rowid()",
                     (item.get("document_kind", "unknown"), item.get("payment_status", "unknown")),
+                )
+                self.conn.execute(
+                    "UPDATE receipts SET intermediary = ?, purpose = ?, description = ?, fee_minor = ?, debit_minor = ?, "
+                    "identifiers_json = ? WHERE id = last_insert_rowid()",
+                    (
+                        item.get("intermediary"),
+                        item.get("purpose"),
+                        item.get("description"),
+                        item.get("fee_minor"),
+                        item.get("debit_minor"),
+                        json.dumps(item["identifiers"], ensure_ascii=False) if item.get("identifiers") else None,
+                    ),
                 )
             self.conn.execute(
                 "UPDATE documents SET status = 'ai_done', error_code = NULL, updated_at = ? WHERE id = ?",
