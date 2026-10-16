@@ -15,6 +15,7 @@ from mail_assistant.config import (
     OPENCODE_GO_RECEIPTS_CONFIRMED,
     AppError,
     ReceiptSettings,
+    llm_stage_limit,
     load_llm_settings,
     load_mail_settings,
     load_receipt_settings,
@@ -54,7 +55,6 @@ COMPATIBLE_MODELS = (
 )
 KIND_CHOICES = {"Все (PNG и PDF)": "all", "Только PNG": "png", "Только PDF": "pdf"}
 MAX_RECOGNIZE_PER_CLICK = 3
-LLM_STAGE_LIMIT = 100  # общий потолок облачных запросов этапа, включая повторы; уже сделанные учитываются
 
 
 @dataclass(frozen=True)
@@ -155,9 +155,10 @@ def recognize_documents(
     llm = load_llm_settings(model)
     ids = document_ids[:MAX_RECOGNIZE_PER_CLICK]
     used = store.conn.execute("SELECT COUNT(*) FROM processing_attempts WHERE stage = 'llm'").fetchone()[0]
-    remaining = LLM_STAGE_LIMIT - used
+    ceiling = llm_stage_limit()
+    remaining = ceiling - used
     if remaining <= 0:
-        raise AppError(f"Лимит {LLM_STAGE_LIMIT} LLM-запросов на этап исчерпан")
+        raise AppError(f"Лимит {ceiling} LLM-запросов на этап исчерпан (LLM_STAGE_LIMIT)")
     # На каждый документ: один запрос и не более одного повтора при length.
     ai = AiOptions(allow_cloud=True, llm_settings=llm, budget=LLMBudget(min(remaining, 2 * len(ids))))
     # retry_uncertain: явный повтор после таймаута/сети/5xx с неизвестным исходом (возможен второй расход).

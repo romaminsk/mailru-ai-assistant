@@ -124,6 +124,11 @@ def load_mail_settings() -> MailSettings:
     )
 
 
+def llm_stage_limit() -> int:
+    """Защитный потолок облачных запросов этапа, включая уже сделанные. Не лимит провайдера."""
+    return _int("LLM_STAGE_LIMIT", 150, 1, 1000)
+
+
 def load_llm_settings(model: str | None = None) -> LLMSettings:
     """Приоритет модели: --model, затем LLM_MODEL."""
     chosen = (model or "").strip() or _get("LLM_MODEL")

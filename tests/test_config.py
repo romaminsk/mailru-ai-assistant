@@ -91,3 +91,12 @@ def test_invalid_integer_setting_is_reported(monkeypatch):
     monkeypatch.setenv("IMAP_PORT", "abc")
     with pytest.raises(AppError, match="IMAP_PORT"):
         load_mail_settings()
+
+
+def test_llm_stage_limit_defaults_to_150_and_is_configurable(monkeypatch):
+    from mail_assistant.config import llm_stage_limit
+
+    monkeypatch.delenv("LLM_STAGE_LIMIT", raising=False)
+    assert llm_stage_limit() == 150
+    monkeypatch.setenv("LLM_STAGE_LIMIT", "120")
+    assert llm_stage_limit() == 120
