@@ -26,6 +26,15 @@ def billing_block(store: Store) -> bool:
         return False
 
 
+ERROR_LABELS = {
+    'OCR_POOR': 'Не распознан: плохой OCR',
+    'OCR_UNAVAILABLE': 'Не распознан: OCR недоступен',
+    'LLM_FAILED': 'Не обработан: ошибка запроса к AI',
+    'LLM_INVALID': 'Не обработан: ответ AI не разобран',
+    'LLM_UNCERTAIN': 'Не обработан: исход запроса неизвестен, повтор не выполнялся',
+}
+
+
 def document_library(store: Store) -> list[dict[str, Any]]:
     receipts: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for row in store.conn.execute("SELECT * FROM receipts WHERE is_current=1 ORDER BY id"):
@@ -64,7 +73,7 @@ def document_library(store: Store) -> list[dict[str, Any]]:
         elif doc['error_code'] == 'LLM_TRUNCATED':
             group, state = 'error', 'Не распознан: ответ обрезан'
         elif doc['error_code']:
-            group, state = 'error', 'Не обработан: ' + doc['error_code']
+            group, state = 'error', ERROR_LABELS.get(doc['error_code'], 'Не обработан')
         elif doc['status'] == 'ai_done':
             group, state = 'other', 'Не платёж: модель не нашла платёж'
         else:
