@@ -50,3 +50,22 @@ def test_different_text_is_not_a_copy_even_with_same_fields(tmp_path):
         _doc(store, "f" * 64, other)
 
         assert plan_text_copies(store) == []
+
+
+def test_monthly_invoices_with_different_numbers_are_not_copies(tmp_path):
+    """Почти одинаковый текст ежемесячных счетов с разными номерами — разные документы."""
+    base = [f"Строка услуги {index}: начислено {index}.00" for index in range(20)]
+    with Store(tmp_path / "monthly.sqlite3") as store:
+        _doc(store, "1" * 64, base + ["Счет #72323", "Итого 33.99 BYN", "PDF сгенерирован 08.10.2026"])
+        _doc(store, "2" * 64, base + ["Счет #72399", "Итого 33.99 BYN", "PDF сгенерирован 15.10.2026"])
+        assert plan_text_copies(store) == []
+
+
+def test_same_invoice_number_with_generation_date_difference_is_copy_with_reason(tmp_path):
+    base = [f"Строка услуги {index}: начислено {index}.00" for index in range(20)]
+    with Store(tmp_path / "same.sqlite3") as store:
+        _doc(store, "3" * 64, base + ["Счет #72323", "Итого 33.99 BYN", "PDF сгенерирован 08.10.2026"])
+        _doc(store, "4" * 64, base + ["Счет #72323", "Итого 33.99 BYN", "PDF сгенерирован 15.10.2026"])
+        plans = plan_text_copies(store)
+        assert len(plans) == 1
+        assert "номер счёта ['72323'] совпадает" in plans[0].reason

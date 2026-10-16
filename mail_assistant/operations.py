@@ -23,6 +23,7 @@ _IDENTIFIER_PATTERNS = {
     "auth_code": re.compile(r"код авторизации\s*:?\s*([A-Za-z0-9]{4,})", re.I),
     "check_number": re.compile(r"чек\s*(?:№|N[оo]?)\s*(\d{6,})", re.I),
     "unp": re.compile(r"\bУНП\s*:?\s*(\d{9})\b", re.I),
+    "invoice_number": re.compile(r"сч[её]т\s*(?:#|№|N)\s*(\d{3,})", re.I),
 }
 
 
@@ -177,6 +178,11 @@ def unlink_receipt(store: Store, receipt_id: int) -> None:
 COPY_SIMILARITY = 0.95
 
 
+def _invoice_numbers(row: dict[str, Any]) -> set[str]:
+    return {item["value"] for item in extract_identifiers(row.get("extracted_text") or "")
+            if item["type"] == "invoice_number"}
+
+
 def plan_text_copies(store: Store) -> list[LinkPlan]:
     """Копии одного документа: почти весь текст совпадает, а получатель, дата, сумма и валюта равны.
 
@@ -207,13 +213,19 @@ def plan_text_copies(store: Store) -> list[LinkPlan]:
                 ).ratio()
                 if ratio < COPY_SIMILARITY:
                     continue
+                # Разные номера счетов — разные документы, даже при почти полном совпадении текста.
+                if _invoice_numbers(left) != _invoice_numbers(right):
+                    continue
                 ids = sorted([left["id"], right["id"]])
                 plans.append(
                     LinkPlan(
                         identifier={"type": "copy", "value": f"{left['sha256'][:12]}~{right['sha256'][:12]}"},
                         receipt_ids=ids,
                         linked=True,
-                        reason=f"копия документа: текст совпадает на {ratio:.2f}; получатель, дата, сумма и валюта равны",
+                        reason=(
+                            f"копия документа: текст совпадает на {ratio:.2f}; получатель, дата, сумма и валюта равны"
+                            + (f"; номер счёта {sorted(_invoice_numbers(left)) or 'не указан'} совпадает")
+                        ),
                     )
                 )
     return plans
