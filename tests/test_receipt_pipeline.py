@@ -530,22 +530,19 @@ def test_non_receipt_text_never_reaches_llm(store, settings):
     assert fake.calls == []
 
 
-def test_length_is_retried_once_with_4096_tokens(store, settings):
+def test_receipt_call_uses_4096_tokens_and_is_not_retried_on_length(store, settings):
     seen = []
 
     def responder(request):
-        body = json.loads(request.content)
-        seen.append(body["max_tokens"])
-        if body["max_tokens"] == 800:
-            return completion(None, finish="length")
-        return completion(receipt_json())
+        seen.append(json.loads(request.content)["max_tokens"])
+        return completion(None, finish="length")
 
     fake = FakeLLM(responder)
     result = run(store, text_pdf(), settings, fake=fake, budget=5)
 
-    assert seen == [800, 4096]
-    assert result.status == "ai_done"
-    assert result.ai_called is True
+    assert seen == [4096]
+    assert len(fake.calls) == 1
+    assert result.error_code == "LLM_TRUNCATED"
 
 
 def test_length_retry_respects_request_budget(store, settings):

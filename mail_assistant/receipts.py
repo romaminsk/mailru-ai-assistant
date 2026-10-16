@@ -276,35 +276,14 @@ def _run_ai(
 
     ai.budget.consume()
     result.ai_called = True
+    # Схема v3 с назначением и описанием не помещается в 800 токенов: сразу берём 4096, повтора нет.
     try:
         with factory(llm) as client:
-            chat = client.chat(payload.messages, model)
+            chat = client.chat(payload.messages, model, max_tokens=RECEIPT_RETRY_MAX_TOKENS)
     except LLMError as exc:
         if exc.details.get("http_status") == 402:
             ai.budget.stop_reason = "LLM_PAYMENT_REQUIRED"
-        can_retry = (
-            _llm_error_code(exc) == "LLM_TRUNCATED"
-            and llm.max_output_tokens < RECEIPT_RETRY_MAX_TOKENS  # повтор без большего бюджета бессмыслен
-            and ai.budget.available()
-        )
-        if not can_retry:
-            return _record_llm_failure(store, document_id, exc, model, started, result)
-        # Один повтор только при явном finish_reason=length, с бюджетом вывода 4096.
-        # Первый обрезанный вызов фиксируется отдельно: он тоже потратил запрос.
-        store.record_attempt(
-            document_id, stage="llm", status="failed", error_code="LLM_TRUNCATED", model=model, usage=exc.details.get("usage"),
-            started_at=started, extractor_version=EXTRACTOR_VERSION_NAME, prompt_version=PROMPT_VERSION,
-            schema_version=SCHEMA_VERSION, diagnostics=exc.details,
-        )
-        ai.budget.consume()
-        result.notes.append("Ответ обрезан по лимиту: один повтор с бюджетом вывода 4096 токенов")
-        try:
-            with factory(llm) as client:
-                chat = client.chat(payload.messages, model, max_tokens=RECEIPT_RETRY_MAX_TOKENS)
-        except LLMError as retry_exc:
-            if retry_exc.details.get("http_status") == 402:
-                ai.budget.stop_reason = "LLM_PAYMENT_REQUIRED"
-            return _record_llm_failure(store, document_id, retry_exc, model, started, result)
+        return _record_llm_failure(store, document_id, exc, model, started, result)
 
     try:
         batch = parse_receipt_batch(chat.content, chat.diagnostics)
