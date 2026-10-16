@@ -10,6 +10,7 @@ from synthetic_docs import make_pdf
 from mail_assistant.operations import (
     apply_plan,
     extract_identifiers,
+    link_operations,
     plan_links,
     unlink_receipt,
 )
@@ -85,6 +86,16 @@ def test_two_documents_of_one_payment_make_one_operation_counted_once(store):
     assert report["confirmed_total"] == 1
     assert report["confirmed_documents"] == 2
     assert report["currencies"]["BYN"]["expense"] == "2488.00"
+
+
+def test_link_operations_after_save_is_idempotent(store):
+    _save(store, "1" * 64, _item())
+    _save(store, "2" * 64, _item())
+    assert link_operations(store) == 1
+    assert link_operations(store) == 0
+    rows = store.conn.execute("SELECT operation_id FROM receipts").fetchall()
+    assert len({row["operation_id"] for row in rows}) == 1
+    assert store.conn.execute("SELECT COUNT(*) FROM operations").fetchone()[0] == 1
 
 
 def test_contradicting_amounts_block_automatic_linking(store):

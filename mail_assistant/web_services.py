@@ -29,6 +29,7 @@ from mail_assistant.receipts import (
     analyze_document_text,
     process_document,
 )
+from mail_assistant.operations import link_operations
 from mail_assistant.report import build_report
 from mail_assistant.storage import Store
 from mail_assistant.sync import SyncStats, describe_plan, describe_stats, plan_sync, run_sync
@@ -166,6 +167,7 @@ def recognize_documents(
         results.append(result)
         if result.error_code == "LLM_PAYMENT_REQUIRED":
             break
+    link_operations(store)
     return results
 
 

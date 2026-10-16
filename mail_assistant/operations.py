@@ -158,6 +158,30 @@ def apply_plan(store: Store, plan: LinkPlan) -> int:
     return operation_id
 
 
+def link_operations(store: Store) -> int:
+    """Объединяет только группы с сильным совпавшим идентификатором и без противоречий. Возвращает число групп."""
+    linked = 0
+    for plan in plan_links(store):
+        if not plan.linked:
+            continue
+        operations = store.conn.execute(
+            "SELECT DISTINCT operation_id FROM receipts WHERE id IN ({}) ".format(",".join("?" * len(plan.receipt_ids)))
+            + "AND operation_id IS NOT NULL",
+            plan.receipt_ids,
+        ).fetchall()
+        complete = store.conn.execute(
+            "SELECT COUNT(*) FROM receipts WHERE id IN ({}) AND operation_id IS NOT NULL".format(
+                ",".join("?" * len(plan.receipt_ids))
+            ),
+            plan.receipt_ids,
+        ).fetchone()[0]
+        if len(operations) == 1 and complete == len(plan.receipt_ids):
+            continue
+        apply_plan(store, plan)
+        linked += 1
+    return linked
+
+
 def unlink_receipt(store: Store, receipt_id: int) -> None:
     """Отменяет связь: документ снова самостоятельная запись. История связей сохраняется."""
     row = store.receipt(receipt_id)
