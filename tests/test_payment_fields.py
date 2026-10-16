@@ -146,3 +146,32 @@ def test_label_fallback_creates_review_record_without_ai(tmp_path):
         assert row["review_status"] == "needs_review"
         assert any("без AI" in w for w in json.loads(row["warnings_json"]))
         assert create_from_labels(store, doc) is None
+
+
+CREDIT_REPAYMENT = """Получатель платежа: Закрытое акционерное общество Пример
+Погашение кредита частичное
+Номер кредитного договора А/500086
+Досрочное погашение основного долга: 2488.00;
+Номер операции в ЕРИП: 6926610184
+Сумма: 2 488 BYN"""
+
+
+def test_purpose_without_label_comes_from_operation_line_not_contract_number():
+    fields = payment_fields(CREDIT_REPAYMENT)
+
+    assert fields["purpose"] == "Погашение кредита частичное"
+    assert fields["purpose_quote"] == "Погашение кредита частичное"
+    assert "А/500086" not in (fields["purpose"] or "")
+
+
+def test_purpose_from_amount_line_when_no_other_purpose_line():
+    text = "Получатель платежа: Пример\nДосрочное погашение основного долга: 2488.00;\nСумма: 2 488 BYN"
+    fields = payment_fields(text)
+
+    assert fields["purpose"] == "Досрочное погашение основного долга"
+    assert fields["purpose_quote"] == "Досрочное погашение основного долга: 2488.00;"
+
+
+def test_requisites_alone_give_no_purpose():
+    text = "Номер кредитного договора А/500086\nНомер операции в ЕРИП: 6926610184\nСумма: 2 488 BYN"
+    assert payment_fields(text)["purpose"] is None

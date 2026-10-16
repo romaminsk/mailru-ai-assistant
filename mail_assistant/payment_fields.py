@@ -22,6 +22,18 @@ _LABELS = {
     "total": re.compile(rf"^\s*сумма\s*:\s*{_MONEY}", re.I | re.M),
 }
 _ERIP_RE = re.compile(r"\bЕРИП\b|\bERIP\b", re.I)
+# Строки операции, которые описывают «за что» платёж, без подписи «Назначение платежа».
+_PURPOSE_HINT = re.compile(
+    r"погашени|оплат|платеж|взнос|услуг|перевод|возврат|покупк|кредит|аренд|штраф|пополнени|абонент",
+    re.I,
+)
+# Строки реквизитов: это не назначение, даже если содержат слова из подсказок.
+_REQUISITE = re.compile(
+    r"договор|номер|№|\bсч[её]т|\bИНН\b|\bУНП\b|получател|плательщик|адрес|\bкод\b|\bБИК\b|\bIBAN\b|RRN|"
+    r"чек|ЕРИП|операци[ияи]\s+в\s+ЕРИП|авторизац",
+    re.I,
+)
+
 
 
 @dataclass(frozen=True)
@@ -52,9 +64,26 @@ def _amount(labeled: Labeled | None) -> Decimal | None:
         return None
 
 
+def _purpose_from_operation_lines(text: str) -> Labeled | None:
+    """Назначение без подписи: первая строка операции, где есть смысл платежа, а не реквизит.
+
+    Ищется по всему документу, а не по одной подписи: назначение может стоять отдельной строкой
+    («Погашение кредита частичное») или в строке суммы («Досрочное погашение основного долга: 2488.00»).
+    """
+    for line in text.splitlines():
+        clean = line.strip()
+        if not clean or _REQUISITE.search(clean) or not _PURPOSE_HINT.search(clean):
+            continue
+        value = re.sub(r":?\s*\d{1,12}(?:[ \u00a0\u202f]\d{3})*(?:[.,]\d{1,2})?;?\s*(?:BYN|RUB|USD|EUR|ВУМ)?\s*$", "", clean)
+        value = value.strip(" :;.")
+        if len(value) >= 4:
+            return Labeled(value, clean)
+    return None
+
+
 def payment_fields(text: str) -> dict[str, Any]:
     """Поля платежа с цитатами. Пустые значения означают «не указано в документе»."""
-    purpose = _first_line(text, "purpose")
+    purpose = _first_line(text, "purpose") or _purpose_from_operation_lines(text)
     recipient = _first_line(text, "recipient")
     service = _amount(_first_line(text, "service"))
     fee_line = _first_line(text, "fee")
