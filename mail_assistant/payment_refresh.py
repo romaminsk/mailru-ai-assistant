@@ -62,7 +62,7 @@ def refresh_payment_fields(store: Store) -> int:
     return changed
 
 
-PAYMENT_FIELDS = ("purpose", "description", "intermediary", "fee_minor", "debit_minor")
+PAYMENT_FIELDS = ("merchant_name", "purpose", "description", "intermediary", "fee_minor", "debit_minor")
 
 
 def fill_empty_payment_fields(store: Store, document_id: int, rows: list[dict[str, Any]]) -> int:
