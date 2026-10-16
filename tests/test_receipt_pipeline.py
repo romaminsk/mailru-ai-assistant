@@ -592,3 +592,24 @@ def test_invalid_json_attempt_stores_safe_diagnostics_only(store, settings):
     assert row["error_code"] == "LLM_INVALID"
     assert "SECRET-REASONING" not in (row["diagnostics_json"] or "")
     assert json.loads(row["diagnostics_json"])["json_error"] == "no_json_object"
+
+
+def test_purpose_only_fills_empty_purpose_and_keeps_other_fields(store, settings):
+    first = run(store, text_pdf(), settings, fake=FakeLLM(lambda r: completion(receipt_json())))
+    before = current(store, first.document_id)[0]
+    assert before["purpose"] is None
+
+    evidence = {"merchant": "MAGAZIN TEST LLC", "date": "05.10.2026 14:32", "amount": "ITOGO 900.00 RUB",
+                "operation": "SALE 1000.00 RUB", "purpose": "SALE 1000.00 RUB"}
+    later = FakeLLM(lambda r: completion(receipt_json(total_amount="1000.00", purpose="SALE 1000.00 RUB", evidence=evidence)))
+    analyze_document_text(store, first.document_id, ai_options(later, budget=5), force=True, purpose_only=True)
+
+    after = current(store, first.document_id)[0]
+    assert len(later.calls) == 1
+    assert after["purpose"] == "SALE 1000.00 RUB"
+    assert after["amount_minor"] == before["amount_minor"] == 90000
+    assert after["amount_text"] == "900.00"
+    history = store.conn.execute(
+        "SELECT field FROM receipt_corrections WHERE receipt_id = ? AND field = 'model_fill:purpose'", (after["id"],)
+    ).fetchall()
+    assert len(history) == 1

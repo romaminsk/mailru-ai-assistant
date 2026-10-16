@@ -235,6 +235,7 @@ def _run_ai(
     result: ProcessResult,
     reprocess: bool,
     document: Any,
+    purpose_only: bool = False,
 ) -> ProcessResult:
     llm = ai.llm_settings
     if llm is None or not llm.email_use_confirmed:
@@ -303,7 +304,13 @@ def _run_ai(
         started_at=started, extractor_version=EXTRACTOR_VERSION_NAME,
         prompt_version=PROMPT_VERSION, schema_version=SCHEMA_VERSION,
     )
-    store.save_result(document_id, attempt_id, rows)
+    if purpose_only:
+        from mail_assistant.payment_refresh import fill_empty_payment_fields
+
+        filled = fill_empty_payment_fields(store, document_id, rows)
+        result.notes.append(f"назначение дополнено моделью: полей {filled}; остальные поля не изменены")
+    else:
+        store.save_result(document_id, attempt_id, rows)
     result.status = "ai_done"
     result.text_complete = complete
     result.receipt_ids = _current_ids(store, document_id)
@@ -325,7 +332,8 @@ def _record_llm_failure(
 
 
 def analyze_document_text(
-    store: Store, document_id: int, ai: AiOptions, *, retry_uncertain: bool = False, force: bool = False
+    store: Store, document_id: int, ai: AiOptions, *, retry_uncertain: bool = False, force: bool = False,
+    purpose_only: bool = False,
 ) -> ProcessResult:
     """AI-анализ уже извлечённого текста: без повторного OCR и без чтения почты."""
     document = store.document(document_id)
@@ -347,7 +355,7 @@ def analyze_document_text(
         return result
     return _run_ai(
         store, document_id, document["extracted_text"], bool(document["text_complete"]), ai, result,
-        retry_uncertain, document,
+        retry_uncertain, document, purpose_only=purpose_only,
     )
 
 

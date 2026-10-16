@@ -62,6 +62,39 @@ def refresh_payment_fields(store: Store) -> int:
     return changed
 
 
+PAYMENT_FIELDS = ("purpose", "description", "intermediary", "fee_minor", "debit_minor")
+
+
+def fill_empty_payment_fields(store: Store, document_id: int, rows: list[dict[str, Any]]) -> int:
+    """Переносит из нового ответа модели только пустые поля назначения и оттока. Остальное не меняется."""
+    current = {row["ordinal"]: row for row in store.current_receipts(document_id)}
+    filled = 0
+    now = utc_now()
+    with store.conn:
+        for new in rows:
+            old = current.get(new["ordinal"])
+            if old is None or old["manual_edited"] or old["review_status"] in ("confirmed", "rejected"):
+                continue
+            updates = {key: new[key] for key in PAYMENT_FIELDS if old[key] is None and new.get(key) is not None}
+            if old["identifiers_json"] is None and new.get("identifiers"):
+                updates["identifiers_json"] = json.dumps(new["identifiers"], ensure_ascii=False)
+            if not updates:
+                continue
+            for key, value in updates.items():
+                store.conn.execute(
+                    "INSERT INTO receipt_corrections (receipt_id, field, old_value, new_value, changed_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (old["id"], "model_fill:" + key, None, str(value), now),
+                )
+            assignments = ", ".join(f"{key} = ?" for key in updates)
+            store.conn.execute(
+                f"UPDATE receipts SET {assignments}, updated_at = ? WHERE id = ?",
+                [*updates.values(), now, old["id"]],
+            )
+            filled += len(updates)
+    return filled
+
+
 def create_from_labels(store: Store, document_id: int) -> int | None:
     """Запасной путь без AI: запись по явным подписям документа. Всегда на проверку, с пометкой."""
     from mail_assistant.payment_fields import payment_fields
