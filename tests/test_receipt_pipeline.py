@@ -613,3 +613,14 @@ def test_purpose_only_fills_empty_purpose_and_keeps_other_fields(store, settings
         "SELECT field FROM receipt_corrections WHERE receipt_id = ? AND field = 'model_fill:purpose'", (after["id"],)
     ).fetchall()
     assert len(history) == 1
+
+
+def test_purpose_only_truncation_keeps_saved_record_and_status(store, settings):
+    first = run(store, text_pdf(), settings, fake=FakeLLM(lambda r: completion(receipt_json())))
+    truncated = FakeLLM(lambda r: completion(None, finish="length"))
+    analyze_document_text(store, first.document_id, ai_options(truncated, budget=5), force=True, purpose_only=True)
+
+    document = store.document(first.document_id)
+    assert document["status"] == "ai_done"
+    assert document["error_code"] == "LLM_TRUNCATED"
+    assert len(current(store, first.document_id)) == 1

@@ -51,17 +51,22 @@ def document_library(store: Store) -> list[dict[str, Any]]:
         complete = entries and all(r['purpose'] and r['amount_text'] and r['currency'] and r['purchase_date'] for r in entries)
         if entries:
             group = 'with_fields'
-            state = 'Поля извлечены · проверьте' if complete else 'Поля извлечены частично'
+            if doc['error_code'] == 'LLM_TRUNCATED' and not any(r['purpose'] for r in entries):
+                state = 'Назначение не получено: ответ обрезан'
+            else:
+                state = 'Поля извлечены · проверьте' if complete else 'Поля извлечены частично'
         elif diagnostics.get(doc['id'], {}).get('http_status') == 402:
             group, state = 'billing', 'AI остановлен: провайдер вернул HTTP 402'
         elif doc['error_code'] == 'NO_TEXT':
             group, state = 'unreadable', 'Нет читаемого текста / возможно, не чек'
         elif doc['error_code'] == 'NOT_RECEIPT':
             group, state = 'other', 'Не найдено признаков чека'
+        elif doc['error_code'] == 'LLM_TRUNCATED':
+            group, state = 'error', 'Не распознан: ответ обрезан'
         elif doc['error_code']:
             group, state = 'error', 'Не обработан: ' + doc['error_code']
         elif doc['status'] == 'ai_done':
-            group, state = 'other', 'AI не выделил платежей'
+            group, state = 'other', 'Не платёж: модель не нашла платёж'
         else:
             group, state = 'waiting', 'Текст сохранён · ожидает AI' if doc['extracted_text'] else 'Ожидает извлечения текста'
         result.append({

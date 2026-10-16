@@ -284,7 +284,7 @@ def _run_ai(
     except LLMError as exc:
         if exc.details.get("http_status") == 402:
             ai.budget.stop_reason = "LLM_PAYMENT_REQUIRED"
-        return _record_llm_failure(store, document_id, exc, model, started, result)
+        return _record_llm_failure(store, document_id, exc, model, started, result, keep_status=purpose_only)
 
     try:
         batch = parse_receipt_batch(chat.content, chat.diagnostics)
@@ -294,8 +294,9 @@ def _run_ai(
             usage=chat.usage, started_at=started, extractor_version=EXTRACTOR_VERSION_NAME,
             prompt_version=PROMPT_VERSION, schema_version=SCHEMA_VERSION, diagnostics=exc.details,
         )
-        store.set_document_status(document_id, "text_extracted", exc.code)
-        result.status, result.error_code = "text_extracted", exc.code
+        if not purpose_only:
+            store.set_document_status(document_id, "text_extracted", exc.code)
+        result.status, result.error_code = (document["status"] if purpose_only else "text_extracted"), exc.code
         return result
 
     rows = verify_receipts(batch, text, complete)
@@ -318,7 +319,8 @@ def _run_ai(
 
 
 def _record_llm_failure(
-    store: Store, document_id: int, exc: LLMError, model: str, started: str, result: ProcessResult
+    store: Store, document_id: int, exc: LLMError, model: str, started: str, result: ProcessResult,
+    keep_status: bool = False,
 ) -> ProcessResult:
     code = _llm_error_code(exc)
     store.record_attempt(
@@ -326,8 +328,12 @@ def _record_llm_failure(
         extractor_version=EXTRACTOR_VERSION_NAME, prompt_version=PROMPT_VERSION, schema_version=SCHEMA_VERSION,
         usage=exc.details.get("usage"), diagnostics=exc.details,
     )
-    store.set_document_status(document_id, "text_extracted", code)
-    result.status, result.error_code = "text_extracted", code
+    if keep_status:
+        store.set_document_status(document_id, store.document(document_id)["status"], code)
+    else:
+        store.set_document_status(document_id, "text_extracted", code)
+        result.status = "text_extracted"
+    result.error_code = code
     return result
 
 
