@@ -17,7 +17,7 @@
 ## Запуск на рабочей базе (порт 8501)
 
 ```bash
-cd /Users/roma/ai-stuff/mailru-ai-assistant
+cd <папка проекта>
 .venv/bin/python -m streamlit run mail_assistant/web.py --server.address 127.0.0.1 --server.port 8501
 ```
 
