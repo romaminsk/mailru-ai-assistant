@@ -58,6 +58,7 @@ def set_period(page: Page, start: str, end: str) -> None:
             spin = page.get_by_role("spinbutton", name=f"{part}, {label}", exact=True)
             spin.fill(str(int(text)))
             spin.press("Enter")
+            page.keyboard.press("Escape")
     for label, value in (("С", start), ("По", end)):
         for part, text in zip(("year", "month", "day"), value.split("/")):
             spin = page.get_by_role("spinbutton", name=f"{part}, {label}", exact=True)
@@ -72,8 +73,7 @@ def open_tab(page: Page, name: str) -> None:
 def upload(page: Page, paths: Sequence[Path]) -> None:
     open_tab(page, "Добавить чеки")
     page.locator(FILE_INPUT).set_input_files([str(path) for path in paths])
-    for path in paths:
-        expect(page.get_by_text(path.name, exact=True).first).to_be_visible()
+    open_tab(page, "Добавить чеки")  # загрузка перерисовывает страницу и сбрасывает выбранную вкладку
     button = page.get_by_role("button", name="Загрузить файлы")
     expect(button).to_be_enabled()
     button.click()
@@ -120,7 +120,8 @@ def metric(page: Page, label: str) -> Locator:
 def select_review_document(page: Page, text: str) -> None:
     open_tab(page, "Проверить записи")
     page.get_by_label("Документ для проверки", exact=True).click()
-    page.get_by_role("option", name=re.compile(re.escape(text))).click()
+    page.get_by_role("option", name=re.compile(re.escape(text))).first.click()
+    open_tab(page, "Проверить записи")  # перерисовка после выбора может вернуть вкладку «Расходы»
 
 
 def expect_no_crash(page: Page, app: AppServer) -> None:

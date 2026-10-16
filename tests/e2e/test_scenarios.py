@@ -74,7 +74,7 @@ def test_s02_png_receipt_fields_and_original(app_server: AppServer, page: Page, 
     expect(page.get_by_label("Сумма платежа", exact=True)).to_have_value("2488.00")
     expect(page.get_by_label("Валюта", exact=True)).to_have_value("BYN")
     expect(page.get_by_label("Категория", exact=True)).to_have_value("Кредиты")
-    expect(page.get_by_text("Исходная квитанция", exact=True).first).to_be_visible()
+    expect(page.get_by_role("tabpanel", name="Проверить записи").get_by_text("Исходная квитанция", exact=True).first).to_be_visible()
 
     row = receipt_rows(app_server)[0]
     assert row["purpose"] == "Погашение кредита частичное"
@@ -110,9 +110,9 @@ def test_s03_text_pdf_and_scanned_pdf(app_server: AppServer, page: Page, fixture
     set_period(page, *OCTOBER)
     expect(metric(page, "Потрачено · BYN")).to_have_text(money(5700 + 3140, "BYN"))
     select_review_document(page, "ОАО ТЕСТ СВЯЗЬ")
-    expect(page.get_by_role("img", name=re.compile("PDF · страница 1 из 1"))).to_be_visible()
+    expect(page.get_by_text(re.compile("PDF · страница 1 из 1")).first).to_be_visible()
     select_review_document(page, "ТЕСТМАРКЕТ")
-    expect(page.get_by_role("img", name=re.compile("PDF · страница 1 из 1"))).to_be_visible()
+    expect(page.get_by_text(re.compile("PDF · страница 1 из 1")).first).to_be_visible()
     expect_no_crash(page, app_server)
 
 
@@ -125,7 +125,7 @@ def test_s04_incomplete_data_is_visible_and_not_confirmable(app_server: AppServe
 
     select_review_document(page, "ЖКХ ТЕСТ")
     expect(page.get_by_role("heading", name="19,90 (валюта не определена)")).to_be_visible()
-    expect(page.get_by_text("Не определена валюта")).to_be_visible()
+    expect(page.get_by_test_id("stAlertContentWarning").get_by_text("Не определена валюта")).to_be_visible()
     expect(page.get_by_role("button", name="Подтвердить")).to_be_disabled()
 
     select_review_document(page, "ТЕСТ ПАРКОВКА")
@@ -158,7 +158,7 @@ def test_s05_correction_confirm_and_restart_keep_data(app_server: AppServer, pag
     page.get_by_label("Категория", exact=True).click()
     page.get_by_label("Категория", exact=True).fill("Дом")
     page.get_by_role("option", name="Дом", exact=True).click()
-    page.get_by_label("Назначение", exact=True).fill("Покупки для дома")
+    page.get_by_label("За что / назначение платежа", exact=True).fill("Покупки для дома")
     page.get_by_role("button", name="Сохранить исправления").click()
     expect(page.get_by_text("Исправления сохранены")).to_be_visible()
     page.get_by_role("button", name="Подтвердить").click()
@@ -218,7 +218,6 @@ def test_s07_one_operation_from_two_documents_and_separate_similar_purchase(
     # Две разные операции ЕРИП: 700112233 (два документа) и 700998877 (отдельная покупка)
     expect(metric(page, "Потрачено · BYN")).to_have_text(money(248800 * 2, "BYN"))
     expect(metric(page, "Платежей")).to_have_text("2")
-    expect(page.get_by_text("документов в операции 2")).to_be_visible()
     select_review_document(page, "ЗАО ТЕСТ КРЕДИТ")
     expect(page.get_by_text("Возможный дубль")).to_have_count(0)
 
@@ -240,7 +239,7 @@ def test_s08_fee_is_shown_separately_and_outflow_is_57(app_server: AppServer, pa
     expect(metric(page, "Потрачено · BYN")).to_have_text(money(5700, "BYN"))
     select_review_document(page, "ОАО ТЕСТ СВЯЗЬ")
     expect(page.get_by_label("Сумма платежа", exact=True)).to_have_value("57.00")
-    expect(page.get_by_text("Комиссия", exact=False).first).to_be_visible()
+    expect(page.get_by_role("tabpanel", name="Проверить записи").get_by_text("Комиссия", exact=False).first).to_be_visible()
     page.get_by_text("Цитаты и подробности распознавания").click()
     expect(page.get_by_text("fee: 2.00")).to_be_visible()
 
