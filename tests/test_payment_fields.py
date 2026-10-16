@@ -101,3 +101,30 @@ def test_missing_total_uses_service_plus_fee_with_note():
 
     assert fields["debit_amount"] == Decimal("57.00")
     assert any("вычислен" in note for note in fields["notes"])
+
+
+def test_refresh_updates_only_payment_fields_and_keeps_confirmed(tmp_path):
+    from mail_assistant.payment_refresh import refresh_payment_fields
+    from mail_assistant.storage import Store
+    from synthetic_docs import make_pdf
+
+    with Store(tmp_path / "refresh.sqlite3") as store:
+        doc = store.create_document("r" * 64, "application/pdf", 10)
+        store.set_document_text(doc, MEMBERSHIP, True, 1, "text_extracted")
+        store.save_result(doc, None, [{
+            "ordinal": 1, "merchant_name": "СПОРТИВНЫЙ КЛУБ ПРИМЕР", "merchant_tax_id": None, "purchase_date": None,
+            "purchase_time": None, "currency": "BYN", "amount_minor": 5700, "amount_text": "57.00",
+            "operation_type": "expense", "category": "entertainment", "receipt_number": None, "fiscal_id": None,
+            "evidence": {"merchant": "СПОРТИВНЫЙ КЛУБ ПРИМЕР", "date": None, "amount": "Сумма: 57.00 BYN",
+                         "operation": "ЧЛЕНСКИЙ ВЗНОС"},
+            "warnings": [], "review_status": "needs_review", "document_kind": "payment", "payment_status": "paid",
+        }])
+        receipt_id = store.current_receipts(doc)[0]["id"]
+        assert refresh_payment_fields(store) == 1
+        row = store.receipt(receipt_id)
+        assert row["purpose"] == "ЧЛЕНСКИЙ ВЗНОС"
+        assert row["debit_minor"] == 5700 and row["fee_minor"] == 200
+        assert row["amount_minor"] == 5700
+        assert refresh_payment_fields(store) == 0
+        store.set_review(receipt_id, "confirmed")
+        assert refresh_payment_fields(store) == 0
