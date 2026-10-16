@@ -49,12 +49,12 @@ def _raise_for_status(code: int) -> None:
     if 300 <= code < 400:
         raise LLMError("Провайдер вернул редирект; редиректы не выполняются автоматически")
     if code in _STATUS_MESSAGES:
-        raise LLMError(_STATUS_MESSAGES[code])
+        raise LLMError(_STATUS_MESSAGES[code], {"http_status": code})
     if code >= 500:
         raise LLMError(
             f"Ошибка на стороне провайдера (HTTP {code})", {"error_kind": "http_5xx", "http_status": code}, uncertain=True
         )
-    raise LLMError(f"Неожиданный HTTP-статус {code}")
+    raise LLMError(f"Неожиданный HTTP-статус {code}", {"http_status": code})
 
 
 def _token(value: Any) -> str | None:

@@ -51,7 +51,7 @@ COMPATIBLE_MODELS = (
 )
 KIND_CHOICES = {"Все (PNG и PDF)": "all", "Только PNG": "png", "Только PDF": "pdf"}
 MAX_RECOGNIZE_PER_CLICK = 3
-LLM_STAGE_LIMIT = 15  # всего реальных LLM-запросов на этап (включая повторы)
+LLM_STAGE_LIMIT = 100  # общий потолок облачных запросов этапа, включая повторы; уже сделанные учитываются
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 from mail_assistant.payment_fields import payment_fields
@@ -128,3 +129,20 @@ def test_refresh_updates_only_payment_fields_and_keeps_confirmed(tmp_path):
         assert refresh_payment_fields(store) == 0
         store.set_review(receipt_id, "confirmed")
         assert refresh_payment_fields(store) == 0
+
+
+def test_label_fallback_creates_review_record_without_ai(tmp_path):
+    from mail_assistant.payment_refresh import create_from_labels
+    from mail_assistant.storage import Store
+
+    with Store(tmp_path / "labels.sqlite3") as store:
+        doc = store.create_document("s" * 64, "image/png", 10)
+        store.set_document_text(doc, MEMBERSHIP, True, 1, "text_extracted")
+        assert create_from_labels(store, doc) is not None
+        rows = store.current_receipts(doc)
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["amount_minor"] == 5700 and row["debit_minor"] == 5700
+        assert row["review_status"] == "needs_review"
+        assert any("без AI" in w for w in json.loads(row["warnings_json"]))
+        assert create_from_labels(store, doc) is None

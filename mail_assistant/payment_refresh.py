@@ -59,3 +59,47 @@ def refresh_payment_fields(store: Store) -> int:
             )
         changed += 1
     return changed
+
+
+def create_from_labels(store: Store, document_id: int) -> int | None:
+    """Запасной путь без AI: запись по явным подписям документа. Всегда на проверку, с пометкой."""
+    from mail_assistant.payment_fields import payment_fields
+    from mail_assistant.receipt_facts import payment_facts
+
+    document = store.document(document_id)
+    if document is None or not document["extracted_text"]:
+        return None
+    if store.current_receipts(document_id):
+        return None
+    text = document["extracted_text"]
+    fields = payment_fields(text)
+    facts = payment_facts(text)
+    if fields["debit_amount"] is None or facts["currency"] is None:
+        return None
+    if facts["payment_status"] != "paid" and facts["document_kind"] != "payment":
+        return None
+    purpose_quote = fields["purpose_quote"]
+    if purpose_quote is None or not fields["recipient"]:
+        return None
+    item = ReceiptItem(
+        merchant_name=fields["recipient"],
+        purchase_date=facts["purchase_date"],
+        total_amount=str(fields["debit_amount"]),
+        currency=facts["currency"],
+        operation_type="expense",
+        category=facts["category"] or "other",
+        document_kind="payment",
+        payment_status="paid",
+        evidence={
+            "merchant": fields["recipient_quote"],
+            "date": facts["date_quote"],
+            "amount": fields["total_quote"],
+            "operation": purpose_quote,
+        },
+        warnings=["Запись создана по подписям документа без AI: проверьте все поля"],
+    )
+    row = verify_receipts(ReceiptBatch(receipts=[item]), text, bool(document["text_complete"]))[0]
+    row["review_status"] = "needs_review"
+    row["warnings"] = list(dict.fromkeys(row["warnings"]))
+    result_id = store.save_result(document_id, None, [row])
+    return result_id
