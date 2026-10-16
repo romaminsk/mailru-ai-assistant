@@ -20,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+e2e = ["pytest>=8.0", "pytest-playwright>=0.5", "reportlab>=4"]
 
 [tool.setuptools.packages.find]
 include = ["mail_assistant*"]

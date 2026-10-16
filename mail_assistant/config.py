@@ -12,7 +12,8 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ENV_FILE = PROJECT_ROOT / ".env"
+# MAIL_ASSISTANT_ENV_FILE нужен только тестовому запуску: он указывает на несуществующий файл, чтобы не читать настоящий .env.
+ENV_FILE = Path(os.environ["MAIL_ASSISTANT_ENV_FILE"]) if os.environ.get("MAIL_ASSISTANT_ENV_FILE") else PROJECT_ROOT / ".env"
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 MODEL_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}")
 TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
