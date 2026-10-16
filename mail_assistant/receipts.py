@@ -463,6 +463,8 @@ def edit_receipt(store: Store, receipt_id: int, changes: dict[str, str]) -> list
     currency = updates.get("currency", row["currency"])
     if amount_value is not None:
         updates["amount_minor"] = amount_to_minor(amount_value) if currency else None
+        # Ручная сумма — подтверждённый итог и отток одновременно: отчёт считает отток.
+        updates["debit_minor"] = updates["amount_minor"]
     elif "currency" in updates and row["amount_text"] is not None:
         value = parse_amount(row["amount_text"])
         updates["amount_minor"] = amount_to_minor(value) if currency else None
