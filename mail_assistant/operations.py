@@ -172,3 +172,48 @@ def unlink_receipt(store: Store, receipt_id: int) -> None:
         store.conn.execute(
             "UPDATE receipts SET operation_id = NULL, is_primary = 0, updated_at = ? WHERE id = ?", (now, receipt_id)
         )
+
+
+COPY_SIMILARITY = 0.95
+
+
+def plan_text_copies(store: Store) -> list[LinkPlan]:
+    """Копии одного документа: почти весь текст совпадает, а получатель, дата, сумма и валюта равны.
+
+    Совпадения только по сумме и дате не достаточно. Порог сходства строк 0.95.
+    """
+    import difflib
+
+    rows = [
+        dict(row)
+        for row in store.conn.execute(
+            "SELECT r.*, d.sha256, d.extracted_text FROM receipts r JOIN documents d ON d.id = r.document_id "
+            "WHERE r.is_current = 1 AND r.review_status != 'rejected' AND d.extracted_text IS NOT NULL"
+        ).fetchall()
+    ]
+    groups: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        groups[(row["merchant_name"], row["purchase_date"], row["amount_minor"], row["currency"], row["document_kind"])].append(row)
+    plans: list[LinkPlan] = []
+    for key, members in groups.items():
+        if len(members) < 2 or key[0] is None or key[1] is None or key[2] is None:
+            continue
+        for index, left in enumerate(members):
+            for right in members[index + 1:]:
+                if left["document_id"] == right["document_id"]:
+                    continue
+                ratio = difflib.SequenceMatcher(
+                    None, (left["extracted_text"] or "").splitlines(), (right["extracted_text"] or "").splitlines()
+                ).ratio()
+                if ratio < COPY_SIMILARITY:
+                    continue
+                ids = sorted([left["id"], right["id"]])
+                plans.append(
+                    LinkPlan(
+                        identifier={"type": "copy", "value": f"{left['sha256'][:12]}~{right['sha256'][:12]}"},
+                        receipt_ids=ids,
+                        linked=True,
+                        reason=f"копия документа: текст совпадает на {ratio:.2f}; получатель, дата, сумма и валюта равны",
+                    )
+                )
+    return plans
