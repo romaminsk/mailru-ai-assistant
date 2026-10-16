@@ -65,13 +65,13 @@ def build_report(store: Store, date_from: str, date_to: str) -> dict[str, Any]:
         "FROM receipts r "
         "JOIN confirmed_expenses c ON c.receipt_id = r.id "
         "JOIN documents d ON d.id = r.document_id "
-        "WHERE r.is_current = 1 AND r.review_status = 'confirmed' "
+        "WHERE r.is_current = 1 AND r.review_status = 'confirmed' AND d.is_synthetic = 0 "
         "AND r.payment_status != 'unpaid' AND (r.document_kind != 'invoice' OR r.payment_status = 'paid') "
         "AND r.purchase_date BETWEEN ? AND ? ORDER BY r.purchase_date, r.id",
         (start, end),
     ).fetchall()
     pending_in_period = store.conn.execute(
-        "SELECT COUNT(*) FROM receipts WHERE is_current = 1 "
+        "SELECT COUNT(*) FROM receipts WHERE is_current = 1 AND document_id NOT IN (SELECT id FROM documents WHERE is_synthetic = 1) "
         "AND review_status IN ('extracted', 'needs_review') AND purchase_date BETWEEN ? AND ?",
         (start, end),
     ).fetchone()[0]

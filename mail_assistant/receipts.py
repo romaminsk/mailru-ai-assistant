@@ -162,6 +162,8 @@ def process_document(
         mailbox_id = store.ensure_mailbox(source.account, source.mailbox, source.uidvalidity)
         message_id = store.ensure_message(mailbox_id, source.uid, None)
     store.add_source(document_id, message_id, source.part_name)
+    if source.part_name.startswith("synthetic_"):
+        store.mark_synthetic(document_id)
     if settings.store_originals and len(data) <= settings.max_bytes:
         _store_original(settings, sha256, data)
 
@@ -477,7 +479,7 @@ def edit_receipt(store: Store, receipt_id: int, changes: dict[str, str]) -> list
 def review_queue(store: Store) -> list[dict[str, Any]]:
     rows = store.conn.execute(
         "SELECT r.*, d.text_complete FROM receipts r JOIN documents d ON d.id = r.document_id "
-        "WHERE r.is_current = 1 AND r.review_status IN ('needs_review', 'extracted') "
+        "WHERE r.is_current = 1 AND d.is_synthetic = 0 AND r.review_status IN ('needs_review', 'extracted') "
         "ORDER BY r.purchase_date IS NULL, r.purchase_date, r.id"
     ).fetchall()
     return [dict(row) for row in rows]
@@ -488,7 +490,8 @@ def duplicate_suspects(store: Store) -> list[dict[str, Any]]:
     rows = store.conn.execute(
         "SELECT merchant_name, purchase_date, currency, amount_minor, COUNT(DISTINCT document_id) AS documents, "
         "GROUP_CONCAT(id) AS receipt_ids FROM receipts "
-        "WHERE is_current = 1 AND merchant_name IS NOT NULL AND purchase_date IS NOT NULL AND amount_minor IS NOT NULL "
+        "WHERE is_current = 1 AND document_id NOT IN (SELECT id FROM documents WHERE is_synthetic = 1) "
+        "AND merchant_name IS NOT NULL AND purchase_date IS NOT NULL AND amount_minor IS NOT NULL "
         "AND review_status != 'rejected' "
         "GROUP BY merchant_name, purchase_date, currency, amount_minor HAVING COUNT(DISTINCT document_id) > 1"
     ).fetchall()

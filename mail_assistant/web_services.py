@@ -125,7 +125,7 @@ def pending_documents(store: Store) -> list[dict[str, Any]]:
     rows = store.conn.execute(
         "SELECT d.id, d.sha256, d.status, d.error_code, d.page_count, d.text_complete, "
         "length(d.extracted_text) AS chars FROM documents d "
-        "WHERE d.extracted_text IS NOT NULL AND d.status != 'ai_done' "
+        "WHERE d.extracted_text IS NOT NULL AND d.status != 'ai_done' AND d.is_synthetic = 0 "
         "AND COALESCE(d.error_code, '') NOT IN ('NOT_RECEIPT', 'NO_TEXT', 'LLM_UNCERTAIN') "
         "AND NOT EXISTS (SELECT 1 FROM receipts r WHERE r.document_id = d.id AND r.is_current = 1) "
         "ORDER BY d.id"
@@ -160,7 +160,7 @@ def receipt_rows(store: Store) -> list[dict[str, Any]]:
     rows = store.conn.execute(
         "SELECT r.*, d.sha256, d.status AS document_status, d.error_code AS document_error "
         "FROM receipts r JOIN documents d ON d.id = r.document_id "
-        "WHERE r.is_current = 1 ORDER BY r.purchase_date IS NULL, r.purchase_date, r.id"
+        "WHERE r.is_current = 1 AND d.is_synthetic = 0 ORDER BY r.purchase_date IS NULL, r.purchase_date, r.id"
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -192,6 +192,7 @@ def report_with_pending(store: Store, date_from: str, date_to: str) -> dict[str,
         for row in store.conn.execute(
             "SELECT id, purchase_date, merchant_name, currency, amount_minor, operation_type, category, review_status "
             "FROM receipts WHERE is_current = 1 AND review_status IN ('extracted', 'needs_review') "
+            "AND document_id NOT IN (SELECT id FROM documents WHERE is_synthetic = 1) "
             "AND purchase_date BETWEEN ? AND ? ORDER BY purchase_date, id",
             (date_from, date_to),
         ).fetchall()

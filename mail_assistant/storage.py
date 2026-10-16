@@ -9,7 +9,7 @@ from typing import Any
 
 from mail_assistant.config import AppError
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 REVIEW_STATUSES = ("extracted", "needs_review", "confirmed", "rejected")
 OPERATION_TYPES = ("expense", "refund", "unknown")
 EDITABLE_COLUMNS = frozenset(
@@ -131,6 +131,13 @@ MIGRATIONS: dict[int, str] = {
     ALTER TABLE receipts ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'unknown';
     """,    # Финансовые операции: один платёж или покупка может иметь несколько документов.
     # Расход учитывается по операции, а не по документу. Связи сохраняют основание и обратимы.
+    # Синтетические тестовые документы: только по имени источника synthetic_*. Личные документы не меняются.
+    5: """
+    ALTER TABLE documents ADD COLUMN is_synthetic INTEGER NOT NULL DEFAULT 0;
+    UPDATE documents SET is_synthetic = 1
+     WHERE id IN (SELECT document_id FROM document_sources WHERE part_name LIKE 'synthetic\\_%' ESCAPE '\\')
+       AND id NOT IN (SELECT document_id FROM document_sources WHERE part_name NOT LIKE 'synthetic\\_%' ESCAPE '\\');
+    """,
     4: """
     ALTER TABLE receipts ADD COLUMN intermediary TEXT;
     ALTER TABLE receipts ADD COLUMN purpose TEXT;
@@ -163,6 +170,10 @@ MIGRATIONS: dict[int, str] = {
     CREATE INDEX receipts_operation ON receipts(operation_id);
     """,
 }
+
+
+# Синтетические документы не попадают в очередь, сводки, отчёты и интерфейс.
+NOT_SYNTHETIC_DOCUMENT = "document_id NOT IN (SELECT id FROM documents WHERE is_synthetic = 1)"
 
 
 class StorageError(AppError):
@@ -260,6 +271,10 @@ class Store:
                 "INSERT INTO document_sources (document_id, message_id, part_name, first_seen_at) VALUES (?, ?, ?, ?)",
                 (document_id, message_id, part_name, utc_now()),
             )
+
+    def mark_synthetic(self, document_id: int) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE documents SET is_synthetic = 1, updated_at = ? WHERE id = ?", (utc_now(), document_id))
 
     def sources_for(self, document_id: int) -> list[sqlite3.Row]:
         return self.conn.execute(
