@@ -30,6 +30,8 @@ class ReceiptEvidence(_Strict):
     date: str | None = Field(default=None, max_length=300)
     amount: str | None = Field(default=None, max_length=300)
     operation: str | None = Field(default=None, max_length=300)
+    purpose: str | None = Field(default=None, max_length=300)
+    fee: str | None = Field(default=None, max_length=300)
 
 
 class ReceiptItem(_Strict):
@@ -45,8 +47,25 @@ class ReceiptItem(_Strict):
     fiscal_id: str | None = Field(default=None, max_length=100)
     document_kind: Literal["receipt", "payment", "invoice", "unknown"] = "unknown"
     payment_status: Literal["paid", "unpaid", "unknown"] = "unknown"
+    intermediary: str | None = Field(default=None, max_length=100)
+    purpose: str | None = Field(default=None, max_length=300)
+    description: str | None = Field(default=None, max_length=200)
+    fee_amount: str | None = Field(default=None, max_length=20)
+    debit_amount: str | None = Field(default=None, max_length=20)
     evidence: ReceiptEvidence = Field(default_factory=ReceiptEvidence)
     warnings: list[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("fee_amount", "debit_amount", mode="before")
+    @classmethod
+    def _optional_amount(cls, value: Any) -> str | None:
+        # Необязательные суммы: некорректная очищается до null, ответ не отбрасывается.
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            parse_amount(value)
+        except Exception:
+            return None
+        return value.strip()
 
     @field_validator("purchase_date")
     @classmethod

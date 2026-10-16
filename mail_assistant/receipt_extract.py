@@ -16,8 +16,8 @@ from mail_assistant.receipt_facts import payment_facts
 from mail_assistant.payment_fields import payment_fields
 from mail_assistant.operations import extract_identifiers
 
-PROMPT_VERSION = "receipt-prompt-2"
-SCHEMA_VERSION = "receipt-schema-2"
+PROMPT_VERSION = "receipt-prompt-3"
+SCHEMA_VERSION = "receipt-schema-3"
 _FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
 _TOTAL_LINE_RE = re.compile(r"итог|itog|всего|к оплате|total|сумма", re.IGNORECASE)
 _NON_TOTAL_LINE_RE = re.compile(r"ндс|vat|скидк|сдач|внесен|наличн|бонус|discount|change|cash|наличные", re.IGNORECASE)
@@ -51,11 +51,19 @@ RECEIPT_SYSTEM_PROMPT = (
     "category: food, transport, health, household, clothing, electronics, services, entertainment, loan (кредит), utilities (ЖКУ) или other.\n"
     "Для каждого непустого поля (merchant_name, purchase_date, total_amount, operation_type) дай в evidence "
     "короткую точную цитату из текста документа, дословно.\n"
+    "purpose — за что сделан платёж: ищи по всему тексту, даже без подписи «Назначение платежа». "
+    "Примеры: «Погашение кредита частичное», «Членский взнос», «Коммунальные услуги за октябрь». "
+    "Дай в evidence.purpose дословную строку-основание. Реквизиты (номер договора, счёта, операции, ИНН) назначением не являются. "
+    "Если назначения нет, используй null; отсутствие подписи не означает отсутствие назначения.\n"
+    "description — короткое понятное описание по-русски (до 120 символов), опираясь только на purpose и текст.\n"
+    "intermediary — посредник (например ЕРИП), если платёж проведён через него; merchant_name — получатель денег.\n"
+    "fee_amount — комиссия, если указана отдельно; debit_amount — сумма, которая списана со счёта (итог с комиссией).\n"
     "Ответь только одним JSON-объектом без пояснений и без markdown в формате:\n"
     '{"receipts": [{"merchant_name": null, "merchant_tax_id": null, "purchase_date": null, '
     '"purchase_time": null, "currency": null, "total_amount": null, "operation_type": "unknown", '
     '"category": "other", "receipt_number": null, "fiscal_id": null, "document_kind": "unknown", "payment_status": "unknown", '
-    '"evidence": {"merchant": null, "date": null, "amount": null, "operation": null}, "warnings": []}]}\n'
+    '"intermediary": null, "purpose": null, "description": null, "fee_amount": null, "debit_amount": null, '
+    '"evidence": {"merchant": null, "date": null, "amount": null, "operation": null, "purpose": null, "fee": null}, "warnings": []}]}\n'
     "Даты в формате YYYY-MM-DD, время HH:MM, суммы десятичной строкой с точкой (например 1234.50), "
     "валюта — код ISO (RUB, USD, EUR, ...)."
 )
@@ -287,21 +295,45 @@ def _verify_item(
     if fields["intermediary"] and merchant and fields["intermediary"].lower() in merchant.lower():
         warnings.append("Получатель в чеке — платёжная система ЕРИП; реальный получатель по документу не указан")
     warnings.extend(fields["notes"])
+
+    # Назначение: ответ модели с подтверждающей цитатой побеждает. Локальное правило только заполняет пустое
+    # поле и никогда не заменяет непустое обоснованное значение модели.
+    model_purpose = item.purpose[:300] if item.purpose else None
+    if model_purpose and not _in_text(evidence.get("purpose") or "", haystack):
+        warnings.append("Назначение от модели без подтверждающей цитаты не использовано")
+        model_purpose = None
+    local_purpose = fields["purpose"][:300] if fields["purpose"] else None
+    if local_purpose and fields["purpose_quote"] and not _in_text(fields["purpose_quote"], haystack):
+        local_purpose = None
+    purpose = model_purpose or local_purpose
+    description = None
+    if purpose:
+        model_description = item.description[:200] if item.description else None
+        description = model_description if model_description and model_purpose else purpose
+
+    intermediary = None
+    if item.intermediary and item.intermediary.upper() in text.upper():
+        intermediary = item.intermediary[:100]
+    intermediary = intermediary or fields["intermediary"]
+
     fee_minor = None
-    if fields["fee_amount"] is not None and currency is not None:
-        fee_minor = amount_to_minor(fields["fee_amount"])
+    fee_value = None
+    if item.fee_amount and _in_text(evidence.get("fee") or "", haystack):
+        fee_value = parse_amount(item.fee_amount)
+    elif fields["fee_amount"] is not None:
+        fee_value = fields["fee_amount"]
+    if fee_value is not None and currency is not None:
+        fee_minor = amount_to_minor(fee_value)
     debit_minor = None
-    if fields["debit_amount"] is not None and amount_minor is not None:
-        # Отток — итог списания: комиссия уже в нём и не прибавляется повторно.
-        debit_minor = amount_to_minor(fields["debit_amount"])
-    purpose = fields["purpose"][:300] if fields["purpose"] else None
-    description = purpose
-    if purpose and fields["purpose_quote"] and not _in_text(fields["purpose_quote"], haystack):
-        purpose = description = None
+    if amount_minor is not None:
+        # Отток — итог списания, подтверждённый цитатой. Комиссия уже в нём и не прибавляется повторно.
+        debit_minor = amount_minor
+        if item.debit_amount and parse_amount(item.debit_amount) != parse_amount(amount_text or "0"):
+            warnings.append("Сумма списания от модели отличается от итога; использован подтверждённый итог")
 
     return {
         "ordinal": ordinal,
-        "intermediary": fields["intermediary"],
+        "intermediary": intermediary,
         "purpose": purpose,
         "description": description,
         "fee_minor": fee_minor,

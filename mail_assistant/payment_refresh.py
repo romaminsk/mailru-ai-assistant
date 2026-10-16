@@ -40,7 +40,8 @@ def refresh_payment_fields(store: Store) -> int:
             "debit_minor": fresh["debit_minor"],
             "identifiers_json": json.dumps(fresh["identifiers"], ensure_ascii=False) if fresh["identifiers"] else None,
         }
-        updates = {key: value for key, value in new_values.items() if row[key] != value}
+        # Пересчёт только заполняет пустые поля: непустое значение (в т.ч. от модели) не заменяется.
+        updates = {key: value for key, value in new_values.items() if row[key] is None and value is not None}
         if not updates:
             continue
         now = utc_now()
