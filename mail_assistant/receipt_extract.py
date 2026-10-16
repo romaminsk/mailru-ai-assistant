@@ -244,7 +244,7 @@ def _verify_item(
     fiscal_id = item.fiscal_id if item.fiscal_id and _in_text(item.fiscal_id, haystack) else None
 
     currency = item.currency
-    recovered_currency = facts["document_kind"] == "payment" and facts["currency"]
+    recovered_currency = facts["currency"]
     if recovered_currency and currency in (None, recovered_currency):
         currency = recovered_currency
         if facts["currency_corrected"]:

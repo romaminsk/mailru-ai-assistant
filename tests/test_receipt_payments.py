@@ -53,9 +53,9 @@ def test_erip_credit_payment_with_integer_amount_and_ocr_currency():
     assert any("OCR" in warning for warning in row["warnings"])
 
 
-def test_ocr_currency_alias_requires_erip_context():
+def test_ocr_currency_alias_does_not_need_erip_context():
     text = TEXT.replace("Номер операции в ЕРИП: 12345678", "")
-    assert payment_facts(text)["currency"] is None
+    assert payment_facts(text)["currency"] == "BYN"
 
 
 def test_conflicting_currencies_are_not_guessed():
@@ -94,6 +94,19 @@ def test_optional_belarus_tax_id_is_supported():
 def test_no_reference_numbers_or_subtotals_treated_as_total():
     facts = payment_facts(TEXT + "\nИтого начислено 999\nНомер услуги ЕРИП: 4271331")
     assert str(facts["amount"]) == "2488.00"
+
+
+def test_ocr_vum_restores_byn_for_any_document_without_other_currency():
+    text = "Приорбанк\nПлатежи в Профком\n95,00 ВУМ\n15.10.2026 11:33:49\nСумма: 95,00 ВУМ"
+    facts = payment_facts(text)
+    assert facts["currency"] == "BYN"
+    assert facts["currency_corrected"] is True
+    row = verify_receipts(ReceiptBatch(receipts=[item(total_amount="95.00", currency=None, evidence={
+        "merchant": "Тестовый Банк", "date": "15.10.2026 11:33:49", "amount": "Сумма: 95,00 ВУМ",
+        "operation": "Платежи в Профком"})]), text, True)[0]
+    assert row["currency"] == "BYN"
+    assert row["amount_minor"] == 9500
+    assert any("ВУМ" in warning for warning in row["warnings"])
 
 
 def test_unpaid_invoice_cannot_be_confirmed_or_included(tmp_path):

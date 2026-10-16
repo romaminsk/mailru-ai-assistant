@@ -26,14 +26,11 @@ _LABELED_TOTAL = re.compile(
 def payment_facts(text: str) -> dict[str, Any]:
     """Return only unambiguous facts. No amounts inferred from account/receipt IDs."""
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    erip = bool(re.search(r"ерип|еритг", text, re.I))
     currencies: set[str] = set()
     corrected = False
     for match in _MONEY.finditer(text):
         code = match["currency"].upper()
         if code not in SUPPORTED_CURRENCIES:
-            if not erip:
-                continue
             code = "BYN"
             corrected = True
         currencies.add(code)
