@@ -34,7 +34,9 @@ def money_label(row: dict[str, Any]) -> str:
 
 def issues(row: dict[str, Any]) -> list[str]:
     result = []
-    for key, label in (("amount_text", "Сумма не распознана"), ("currency", "Не определена валюта"),
+    if row.get("amount_text") is None and row.get("amount_minor") is None:
+        result.append("Сумма не распознана")
+    for key, label in (("currency", "Не определена валюта"),
                        ("purchase_date", "Не определена дата"), ("merchant_name", "Не определён получатель")):
         if row.get(key) is None:
             result.append(label)

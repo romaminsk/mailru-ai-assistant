@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date
+import json
+import os
 from typing import Any
 
 from mail_assistant.config import (
@@ -69,7 +71,7 @@ def open_store() -> Store:
     return Store(load_receipt_settings().db_path)
 
 
-def cloud_status() -> CloudStatus:
+def cloud_status(*, billing_retry: bool = False) -> CloudStatus:
     if not OPENCODE_GO_RECEIPTS_CONFIRMED:
         return CloudStatus(False, "Облачный AI отключён: условия провайдера для чеков не подтверждены")
     try:
@@ -78,6 +80,11 @@ def cloud_status() -> CloudStatus:
         return CloudStatus(False, str(exc))
     if not llm.email_use_confirmed:
         return CloudStatus(False, "LLM_EMAIL_USE_CONFIRMED не равен true")
+    from mail_assistant.document_library import billing_block
+
+    with open_store() as store:
+        if not billing_retry and billing_block(store):
+            return CloudStatus(False, "Обработка приостановлена: провайдер вернул HTTP 402. Проверьте оплату/лимит; новые запросы не отправляются")
     return CloudStatus(True, "Облачный AI доступен")
 
 
@@ -136,10 +143,10 @@ def pending_documents(store: Store) -> list[dict[str, Any]]:
 
 
 def recognize_documents(
-    store: Store, model: str, document_ids: list[int], *, retry_uncertain: bool = False
+    store: Store, model: str, document_ids: list[int], *, retry_uncertain: bool = False, billing_retry: bool = False
 ) -> list[ProcessResult]:
     """AI-анализ выбранных документов. Выполняется только по кнопке и только при подтверждённом облаке."""
-    status = cloud_status()
+    status = cloud_status(billing_retry=billing_retry)
     if not status.allowed:
         raise AppError(status.reason)
     if model not in COMPATIBLE_MODELS:
@@ -153,7 +160,13 @@ def recognize_documents(
     # На каждый документ: один запрос и не более одного повтора при length.
     ai = AiOptions(allow_cloud=True, llm_settings=llm, budget=LLMBudget(min(remaining, 2 * len(ids))))
     # retry_uncertain: явный повтор после таймаута/сети/5xx с неизвестным исходом (возможен второй расход).
-    return [analyze_document_text(store, document_id, ai, retry_uncertain=retry_uncertain) for document_id in ids]
+    results = []
+    for document_id in ids:
+        result = analyze_document_text(store, document_id, ai, retry_uncertain=retry_uncertain)
+        results.append(result)
+        if result.error_code == "LLM_PAYMENT_REQUIRED":
+            break
+    return results
 
 
 def receipt_rows(store: Store) -> list[dict[str, Any]]:
@@ -212,3 +225,26 @@ def preferred_model(store: Store) -> str:
         return configured if configured in COMPATIBLE_MODELS else COMPATIBLE_MODELS[0]
     except AppError:
         return COMPATIBLE_MODELS[0]
+
+
+def audit_mail_coverage(start: date, end: date) -> dict[str, Any]:
+    from mail_assistant.mail_coverage import audit_coverage
+
+    if start > end:
+        raise AppError("Начало периода позже окончания")
+    with open_store() as store:
+        report = audit_coverage(load_mail_settings(), store, start, end)
+    path = load_receipt_settings().db_path.parent / 'mail-coverage.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as handle:
+        json.dump(report, handle, ensure_ascii=False, indent=2)
+    os.chmod(path, 0o600)
+    return report
+
+
+def saved_mail_coverage() -> dict[str, Any] | None:
+    path = load_receipt_settings().db_path.parent / 'mail-coverage.json'
+    try:
+        return json.loads(path.read_text()) if path.exists() else None
+    except (ValueError, OSError):
+        return None

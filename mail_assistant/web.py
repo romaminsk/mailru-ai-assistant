@@ -9,16 +9,18 @@ import streamlit as st
 
 from mail_assistant import web_services as svc
 from mail_assistant.config import AppError, load_env_file
+from mail_assistant.document_library import billing_block, document_library, library_counts, library_table
+from mail_assistant.periods import three_month_period
 from mail_assistant.operation_view import group_operations, operation_summary_rows, operation_table
 from mail_assistant.presentation import (
     CATEGORY_LABELS, KIND_LABELS, OPERATION_LABELS, PAYMENT_LABELS,
-    document_label, issues, money_label, preview_summary, review_label, table_rows,
+    issues, money_label, preview_summary, review_label, table_rows,
 )
 from mail_assistant.receipts import confirm_receipt, duplicate_suspects, edit_receipt, reject_receipt
 from mail_assistant.report import report_csv_text
 from mail_assistant.storage import CATEGORIES, OPERATION_TYPES
 
-st.set_page_config(page_title="Мои расходы", page_icon="🧾", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Чеки и платежи", page_icon="🧾", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""<style>
     .block-container {padding-top: 2rem;}
     [data-testid="stMetricValue"] {font-size: clamp(1.25rem, 4vw, 2rem);}
@@ -104,20 +106,33 @@ with svc.open_store() as store:
     suspects = duplicate_suspects(store)
     pending = svc.pending_documents(store)
     selected_model = svc.preferred_model(store)
+    library = document_library(store)
+    counts = library_counts(library)
+    billing_paused = billing_block(store)
     documents = [dict(row) for row in store.conn.execute(
         "SELECT id, status, error_code, mime_type, length(extracted_text) AS chars FROM documents ORDER BY id DESC"
     )]
 duplicate_ids = {int(value) for group in suspects for value in group["receipt_ids"].split(",")}
 active_rows = [row for row in rows if row["review_status"] != "rejected"]
 
-st.title("Мои расходы")
-st.caption("PNG и PDF → расходы и платежи. Данные сохранены на этом компьютере.")
+st.title("Чеки и платежи")
+st.caption("Все загруженные файлы видны, даже если AI ещё не распознал платёж. Расходы — в отдельной вкладке.")
 if notice := st.session_state.pop("notice", None):
     st.success(notice)
+top = st.columns(2)
+top[0].metric("Загружено реальных документов", counts['total'])
+top[1].metric("Есть извлечённые поля платежа", counts.get('with_fields', 0))
+st.caption(f"Ожидают AI: {counts.get('waiting', 0)} · без полей из-за HTTP 402: {counts.get('billing', 0)} · "
+           f"без читаемого текста: {counts.get('unreadable', 0)} · другие ошибки: {counts.get('error', 0)} · "
+           f"AI не выделил платежей / прочее: {counts.get('other', 0)}. "
+           f"Из документов с полями без назначения: {counts['without_purpose']}.")
+st.info("Это документы, уже загруженные на компьютер, а не полный перечень чеков в почте. Охват всех папок пока не подтверждён.")
+if billing_paused:
+    st.warning("AI остановлен: провайдер вернул HTTP 402 (оплата/лимит). Исходники и распознанный текст сохранены; новые облачные запросы заблокированы.")
 
 with st.sidebar:
     st.header("Период расходов")
-    start = st.date_input("С", today.replace(day=1), key="period_from")
+    start = st.date_input("С", three_month_period(today)[0], key="period_from")
     end = st.date_input("По", today, key="period_to")
     st.caption("По дате покупки или платежа, не по дате письма.")
     scope = st.radio("Показывать", ["Все распознанные", "Только подтверждённые"])
@@ -131,7 +146,7 @@ period_rows = [row for row in active_rows if row["purchase_date"] and start.isof
 if scope == "Только подтверждённые":
     period_rows = [row for row in period_rows if row["review_status"] == "confirmed"]
 
-overview, review, add, files, settings_tab = st.tabs(["Расходы", "Проверить записи", "Добавить чеки", "Документы", "Настройки AI"])
+files, overview, review, add, settings_tab = st.tabs(["Все документы", "Расходы", "Проверить записи", "Добавить чеки", "Настройки AI"])
 
 with overview:
     st.subheader("Куда ушли деньги")
@@ -220,6 +235,7 @@ with review:
         with right:
             with st.form(f"edit-{choice}"):
                 merchant = st.text_input("Получатель / магазин", current["merchant_name"] or "")
+                purpose = st.text_area("За что / назначение платежа", current["purpose"] or "", max_chars=300)
                 date_text = st.text_input("Дата платежа (YYYY-MM-DD)", current["purchase_date"] or "")
                 amount = st.text_input("Сумма платежа", current["amount_text"] or "")
                 currency = st.selectbox("Валюта", ["", "BYN", "RUB", "USD", "EUR", "KZT", "GBP", "CNY", "CHF"],
@@ -231,6 +247,7 @@ with review:
                 save = st.form_submit_button("Сохранить исправления", disabled=_busy())
             if save:
                 pairs = {"merchant": (merchant, current["merchant_name"] or ""), "date": (date_text, current["purchase_date"] or ""),
+                         "purpose": (purpose, current["purpose"] or ""),
                          "amount": (amount, current["amount_text"] or ""), "currency": (currency, current["currency"] or ""),
                          "category": (category, current["category"]), "operation": (operation, current["operation_type"]),
                          "payment_status": (payment, current["payment_status"])}
@@ -261,6 +278,8 @@ with review:
 with add:
     st.subheader("Добавить PNG или PDF")
     st.caption("Сначала текст извлекается локально. Отправка в облачный AI — отдельной кнопкой ниже.")
+    if st.button("Проверить охват всех папок без загрузки файлов", disabled=_busy()):
+        _action_and_refresh(lambda: svc.audit_mail_coverage(start - timedelta(days=14), end), "Папки проверены. Результат — во вкладке «Все документы».")
     uploads = st.file_uploader("Чеки и квитанции", type=["png", "pdf"], accept_multiple_files=True)
     if st.button("Загрузить файлы", disabled=_busy() or not uploads):
         _action_and_refresh(lambda: svc.import_uploads([(item.name, item.getvalue()) for item in uploads]), "Файлы сохранены. Запустите распознавание ниже.")
@@ -286,7 +305,10 @@ with add:
             st.caption(line)
     st.divider()
     st.subheader("Распознать сохранённые документы")
-    cloud = svc.cloud_status()
+    billing_retry = False
+    if billing_paused:
+        billing_retry = st.checkbox("Я решил вопрос с оплатой/лимитом и разрешаю повторную попытку AI")
+    cloud = svc.cloud_status(billing_retry=billing_retry)
     if not cloud.allowed:
         st.info(cloud.reason)
     st.caption(f"Готовы к AI: {len(pending)}. Модель: {st.session_state.get('model', selected_model)}. Повторная отрисовка страницы не отправляет запросы.")
@@ -295,18 +317,63 @@ with add:
     if st.button("Распознать новые", disabled=_busy() or not cloud.allowed or not ids):
         def recognize_action():
             with svc.open_store() as store:
-                results = svc.recognize_documents(store, st.session_state.get("model", selected_model), ids)
+                results = svc.recognize_documents(store, st.session_state.get("model", selected_model), ids, billing_retry=billing_retry)
             st.session_state["recognition_log"] = [f"Документ №{result.document_id}: " + (f"ошибка {result.error_code}" if result.error_code else "готов") for result in results]
         _action_and_refresh(recognize_action, "Обработка завершена. Результаты — во вкладке проверки.")
     for line in st.session_state.get("recognition_log", []):
         st.write(line)
 
 with files:
-    st.subheader("Состояние документов")
-    st.caption("Не путайте обработку файла и подтверждение расхода: обработанный файл ещё нужно проверить.")
-    st.dataframe([{"Документ": row["id"], "Формат": row["mime_type"].split("/")[-1].upper(),
-                   "Состояние": document_label(row), "Символов текста": row["chars"] or 0} for row in documents],
-                 hide_index=True, width="stretch")
+    st.subheader("Все загруженные чеки, платежи и счета")
+    st.caption("Список не скрывает файлы без даты, суммы или результата AI. Фильтр периода расходов к нему не применяется.")
+    coverage = svc.saved_mail_coverage()
+    if coverage:
+        missing = sum(row.get('without_local_source', 0) for row in coverage['folders'])
+        if missing:
+            st.warning(f"В почте ещё {missing} писем-кандидатов без сохранённых вложений. Они пока НЕ загружены в приложение. Кандидат — не обязательно чек; возможны иконки и копии.")
+        with st.expander("Охват папок почты — где ещё остались вложения"):
+            st.caption(f"Проверка {coverage['checked_at']}. По дате получения: {coverage['received_from']} — {coverage['received_to']}. "
+                       "Это число писем с PNG/PDF, а не число уникальных платежей. Наличие одного источника не доказывает импорт всех вложений письма.")
+            st.dataframe([{'Папка': row['folder'], 'Писем в периоде': row.get('messages'),
+                           'С PNG/PDF или неизвестной структурой': row.get('candidate_messages'),
+                           'Есть сохранённый источник': row.get('with_local_source'),
+                           'Ни одного источника не сохранено': row.get('without_local_source'),
+                           'Ошибка': row.get('error', '')} for row in coverage['folders']], hide_index=True, width="stretch")
+    groups = {"Все": None, "Есть поля платежа": "with_fields", "Ожидают AI": "waiting",
+              "Остановлены HTTP 402": "billing", "Нет читаемого текста": "unreadable", "Другие ошибки": "error", "Прочее": "other"}
+    group = st.selectbox("Обработка документов", list(groups))
+    query = st.text_input("Поиск по получателю, назначению или источнику").strip().casefold()
+    visible = [item for item in library if (groups[group] is None or item['group'] == groups[group])
+               and (not query or query in ' '.join((item['filename'], item['recipient'], item['purpose'])).casefold())]
+    st.caption(f"Показано {len(visible)} из {len(library)} загруженных документов.")
+    if visible:
+        st.dataframe(library_table(visible), hide_index=True, width="stretch",
+                     column_order=["№", "Дата платежа", "Сумма", "Получатель", "Назначение", "Обработка", "Источник"])
+        by_document = {item['id']: item for item in visible}
+        default_document = next((index for index, item in enumerate(visible) if item['purpose']), 0)
+        document_id = st.selectbox("Открыть документ", list(by_document), format_func=lambda value:
+                                   f"№{value} · {by_document[value]['recipient'] or by_document[value]['filename']} · {by_document[value]['state']}", index=default_document)
+        selected = by_document[document_id]
+        st.write(selected['state'])
+        left, right = st.columns(2)
+        with left:
+            with svc.open_store() as store:
+                mime, content = svc.original_path(store, document_id)
+            _show_original(mime, content, document_id + 1000000)
+        with right:
+            st.markdown(f"**Сумма:** {selected['amount']}")
+            st.write("Получатель: " + (selected['recipient'] or 'Ещё не распознан'))
+            st.write("Назначение: " + (selected['purpose'] or 'Ещё не распознано — это не означает, что назначения нет в документе'))
+            st.write("Дата платежа: " + (selected['payment_dates'] or 'Ещё не распознана'))
+            st.caption("Источники")
+            for source in selected['sources']:
+                st.text(source)
+            if selected['receipts']:
+                st.caption("Исправление и подтверждение — во вкладке «Проверить записи».")
+        with st.expander("Распознанный текст документа"):
+            st.text(selected['extracted_text'] or 'Читаемый текст пока не получен')
+    else:
+        st.info("Документов по этому фильтру нет.")
     with st.expander("Технические подробности"):
         st.dataframe(documents, hide_index=True, width="stretch")
 

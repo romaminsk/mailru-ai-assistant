@@ -6,7 +6,7 @@ from typing import Any
 
 from mail_assistant.presentation import CATEGORY_LABELS
 
-NO_PURPOSE = "Назначение не указано в документе"
+NO_PURPOSE = "Назначение ещё не распознано"
 
 
 def _is_bill(row: dict[str, Any]) -> bool:

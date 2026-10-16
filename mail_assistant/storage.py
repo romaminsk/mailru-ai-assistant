@@ -14,7 +14,7 @@ REVIEW_STATUSES = ("extracted", "needs_review", "confirmed", "rejected")
 OPERATION_TYPES = ("expense", "refund", "unknown")
 EDITABLE_COLUMNS = frozenset(
     {"merchant_name", "purchase_date", "purchase_time", "currency", "amount_minor", "amount_text", "category",
-     "operation_type", "document_kind", "payment_status", "debit_minor"}
+     "operation_type", "document_kind", "payment_status", "debit_minor", "purpose"}
 )
 CATEGORIES = ("food", "transport", "health", "household", "clothing", "electronics", "services", "entertainment", "loan", "utilities", "other")
 

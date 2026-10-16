@@ -37,6 +37,7 @@ from mail_assistant.storage import CATEGORIES, OPERATION_TYPES, Store, StorageEr
 
 EXTRACTOR_VERSION_NAME = "extractor-1"
 EDITABLE_FIELDS = {
+    "purpose": "purpose",
     "merchant": "merchant_name",
     "date": "purchase_date",
     "time": "purchase_time",
@@ -72,9 +73,10 @@ class LLMBudget:
     def __init__(self, limit: int) -> None:
         self.limit = limit
         self.used = 0
+        self.stop_reason: str | None = None
 
     def available(self) -> bool:
-        return self.used < self.limit
+        return self.stop_reason is None and self.used < self.limit
 
     def consume(self) -> None:
         self.used += 1
@@ -103,6 +105,8 @@ class ProcessResult:
 
 
 def _llm_error_code(exc: LLMError) -> str:
+    if exc.details.get("http_status") == 402:
+        return "LLM_PAYMENT_REQUIRED"
     if exc.uncertain:
         return "LLM_UNCERTAIN"
     details = exc.details
@@ -253,6 +257,10 @@ def _run_ai(
         result.status, result.error_code = "text_extracted", "LLM_UNCERTAIN"
         result.notes.append("Предыдущий запрос завершился неопределённо: повтор только через reprocess")
         return result
+    if ai.budget.stop_reason:
+        result.error_code = ai.budget.stop_reason
+        result.notes.append("Пакет остановлен после HTTP 402: новый запрос не отправлен")
+        return result
     if not ai.budget.available():
         result.error_code = "BUDGET_EXHAUSTED"
         result.notes.append("Лимит LLM-запросов на запуск исчерпан: документ оставлен в очереди")
@@ -272,6 +280,8 @@ def _run_ai(
         with factory(llm) as client:
             chat = client.chat(payload.messages, model)
     except LLMError as exc:
+        if exc.details.get("http_status") == 402:
+            ai.budget.stop_reason = "LLM_PAYMENT_REQUIRED"
         can_retry = (
             _llm_error_code(exc) == "LLM_TRUNCATED"
             and llm.max_output_tokens < RECEIPT_RETRY_MAX_TOKENS  # повтор без большего бюджета бессмыслен
@@ -292,6 +302,8 @@ def _run_ai(
             with factory(llm) as client:
                 chat = client.chat(payload.messages, model, max_tokens=RECEIPT_RETRY_MAX_TOKENS)
         except LLMError as retry_exc:
+            if retry_exc.details.get("http_status") == 402:
+                ai.budget.stop_reason = "LLM_PAYMENT_REQUIRED"
             return _record_llm_failure(store, document_id, retry_exc, model, started, result)
 
     try:
@@ -422,6 +434,11 @@ def edit_receipt(store: Store, receipt_id: int, changes: dict[str, str]) -> list
                 if not value or len(value) > 200:
                     raise ReceiptError("Магазин: от 1 до 200 символов")
                 updates["merchant_name"] = value
+            elif key == "purpose":
+                value = raw.strip()
+                if len(value) > 300:
+                    raise ReceiptError("Назначение: не больше 300 символов")
+                updates["purpose"] = value or None
             elif key == "date":
                 try:
                     date.fromisoformat(raw)
