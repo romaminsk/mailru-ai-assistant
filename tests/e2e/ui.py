@@ -58,15 +58,20 @@ def set_period(page: Page, start: str, end: str) -> None:
             spin = page.get_by_role("spinbutton", name=f"{part}, {label}", exact=True)
             spin.fill(str(int(text)))
             spin.press("Enter")
-            page.keyboard.press("Escape")
-    for label, value in (("С", start), ("По", end)):
-        for part, text in zip(("year", "month", "day"), value.split("/")):
-            spin = page.get_by_role("spinbutton", name=f"{part}, {label}", exact=True)
-            expect(spin).to_have_text(re.compile(rf"^0*{int(text)}$"))
+            page.get_by_role("heading", name="Мои расходы").click()  # закрывает календарь без отмены значения
+            expect(spin).to_have_text(re.compile(rf"^0*{int(text)}\s*$"))
 
 
 def open_tab(page: Page, name: str) -> None:
-    page.get_by_role("tab", name=name).click()
+    """Ждёт состояния «вкладка выбрана». Перерисовка Streamlit может сбросить выбор, поэтому клик повторяется."""
+    tab = page.get_by_role("tab", name=name)
+    for _ in range(3):
+        tab.click()
+        try:
+            expect(page.get_by_role("tab", name=name, selected=True)).to_be_visible(timeout=4000)
+            return
+        except AssertionError:
+            continue
     expect(page.get_by_role("tab", name=name, selected=True)).to_be_visible()
 
 
