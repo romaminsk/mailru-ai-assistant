@@ -288,7 +288,7 @@ def test_s10_ai_invalid_and_timeout_then_explicit_retry(app_server: AppServer, p
     expect(metric(page, "Потрачено · BYN")).to_have_text(money(3140, "BYN"))
 
     fake_llm.queue_modes("АЛЬФА", "invalid")
-    fake_llm.queue_modes("ВЕГА", "timeout")
+    fake_llm.queue_modes("ОРИОН", "timeout")
     upload(page, _files(fixture_paths, "loan_png", "service_pdf"))
     recognize_once(page)
     expect_no_crash(page, app_server)
@@ -300,7 +300,7 @@ def test_s10_ai_invalid_and_timeout_then_explicit_retry(app_server: AppServer, p
         fee = conn.execute("SELECT status, error_code FROM documents WHERE id = ?", (fee_doc,)).fetchone()
     assert (loan["status"], loan["error_code"]) == ("text_extracted", "LLM_INVALID")
     assert (fee["status"], fee["error_code"]) == ("text_extracted", "LLM_UNCERTAIN")
-    assert fake_llm.count("АЛЬФА") == 1 and fake_llm.count("ВЕГА") == 1
+    assert fake_llm.count("АЛЬФА") == 1 and fake_llm.count("ОРИОН") == 1
     assert not [row for row in receipt_rows(app_server) if row["document_id"] in (loan_doc, fee_doc)]
 
     open_app(page)
@@ -309,11 +309,11 @@ def test_s10_ai_invalid_and_timeout_then_explicit_retry(app_server: AppServer, p
 
     # Таймаут с неизвестным исходом не предлагается к повтору и не повторяется сам; неверный ответ — можно
     assert pending_count(app_server) == 1
-    assert fake_llm.count("ВЕГА") == 1
+    assert fake_llm.count("ОРИОН") == 1
 
     # Явный повтор после неверного ответа: один корректный результат, без дубля
     recognize_once(page)
-    assert fake_llm.count("ВЕГА") == 1, "таймаут не должен повторяться автоматически"
+    assert fake_llm.count("ОРИОН") == 1, "таймаут не должен повторяться автоматически"
     assert fake_llm.count("АЛЬФА") == 2
     assert len([row for row in receipt_rows(app_server) if row["document_id"] == loan_doc]) == 1
     open_app(page)
