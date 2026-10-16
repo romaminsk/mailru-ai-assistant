@@ -1,0 +1,44 @@
+# Секреты: настоящий .env и любые его копии. Шаблон .env.example разрешён.
+.env
+.env.*
+*.env
+!.env.example
+
+# Виртуальное окружение, кэши и сборка
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.DS_Store
+
+# Личные данные: база, журналы, резервные копии, оригиналы, OCR-тексты, выгрузки
+data/
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+exports/
+*.csv
+
+# Документы и изображения: в Git попадают только явно разрешённые синтетические файлы
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.eml
+*.msg
+!samples/synthetic_receipt.pdf
+
+# Логи, временные и резервные файлы
+*.log
+*.tmp
+*.bak
+*.orig
+*.swp
+.streamlit/secrets.toml
