@@ -356,7 +356,7 @@ def analyze_document_text(
         return result
     return _run_ai(
         store, document_id, document["extracted_text"], bool(document["text_complete"]), ai, result,
-        retry_uncertain or force, document,
+        retry_uncertain, document,
     )
 
 

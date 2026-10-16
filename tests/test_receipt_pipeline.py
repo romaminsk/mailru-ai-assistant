@@ -19,6 +19,7 @@ from synthetic_docs import make_pdf, make_png
 from mail_assistant.receipts import (
     ReceiptError,
     SourceRef,
+    analyze_document_text,
     confirm_receipt,
     duplicate_suspects,
     edit_receipt,
@@ -245,6 +246,19 @@ def test_uncertain_failure_is_not_retried_automatically(store, settings):
     assert second.error_code == "LLM_UNCERTAIN"
     assert len(fake.calls) == 1
     assert any("reprocess" in note for note in second.notes)
+
+
+def test_schema_refresh_does_not_retry_uncertain_request(store, settings):
+    fake = FakeLLM(lambda r: httpx.Response(500, text="upstream"))
+    first = run(store, text_pdf(), settings, fake=fake)
+    assert first.error_code == "LLM_UNCERTAIN"
+
+    later = FakeLLM(lambda r: completion(receipt_json()))
+    result = analyze_document_text(store, first.document_id, ai_options(later, budget=5), force=True)
+
+    assert later.calls == []
+    assert result.error_code == "LLM_UNCERTAIN"
+    assert current(store, first.document_id) == []
 
 
 def test_auth_failure_is_reported_without_key(store, settings):
