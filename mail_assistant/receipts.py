@@ -489,9 +489,22 @@ def duplicate_suspects(store: Store) -> list[dict[str, Any]]:
         "WHERE is_current = 1 AND document_id NOT IN (SELECT id FROM documents WHERE is_synthetic = 1) "
         "AND merchant_name IS NOT NULL AND purchase_date IS NOT NULL AND amount_minor IS NOT NULL "
         "AND review_status != 'rejected' "
-        "GROUP BY merchant_name, purchase_date, currency, amount_minor HAVING COUNT(DISTINCT document_id) > 1"
+        "GROUP BY merchant_name, purchase_date, currency, amount_minor HAVING COUNT(DISTINCT document_id) > 1 "
+        "AND COUNT(DISTINCT COALESCE(operation_id, -id)) > 1"
     ).fetchall()
-    return [dict(row) for row in rows]
+    return [dict(row) for row in rows if not _proven_separate(store, row["receipt_ids"])]
+
+
+def _proven_separate(store: Store, receipt_ids: str) -> bool:
+    """Два документа с разными сильными идентификаторами ЕРИП/RRN — две операции, а не дубль."""
+    from mail_assistant.operations import STRONG_IDENTIFIERS, identifiers_of
+
+    strong = []
+    for receipt_id in receipt_ids.split(","):
+        row = store.receipt(int(receipt_id))
+        values = {item["value"] for item in identifiers_of(dict(row)) if item["type"] in STRONG_IDENTIFIERS}
+        strong.append(values)
+    return any(a and b and a.isdisjoint(b) for index, a in enumerate(strong) for b in strong[index + 1:])
 
 
 def format_amount(minor: int | None, currency: str | None) -> str:

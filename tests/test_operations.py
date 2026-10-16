@@ -14,6 +14,7 @@ from mail_assistant.operations import (
     plan_links,
     unlink_receipt,
 )
+from mail_assistant.receipts import duplicate_suspects
 from mail_assistant.report import build_report
 from mail_assistant.storage import MIGRATIONS, SCHEMA_VERSION, Store
 
@@ -96,6 +97,18 @@ def test_link_operations_after_save_is_idempotent(store):
     rows = store.conn.execute("SELECT operation_id FROM receipts").fetchall()
     assert len({row["operation_id"] for row in rows}) == 1
     assert store.conn.execute("SELECT COUNT(*) FROM operations").fetchone()[0] == 1
+
+
+def test_similar_purchase_with_other_erip_number_is_not_a_duplicate_suspect(store):
+    _save(store, "3" * 64, _item(identifiers=[{"type": "erip_operation", "value": "111111111"}]))
+    _save(store, "4" * 64, _item(identifiers=[{"type": "erip_operation", "value": "222222222"}]))
+    assert duplicate_suspects(store) == []
+
+
+def test_same_amount_without_identifiers_stays_a_suspect_for_review(store):
+    _save(store, "5" * 64, _item(identifiers=[]))
+    _save(store, "6" * 64, _item(identifiers=[]))
+    assert len(duplicate_suspects(store)) == 1
 
 
 def test_contradicting_amounts_block_automatic_linking(store):
