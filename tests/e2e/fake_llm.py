@@ -112,7 +112,9 @@ def _make_handler(llm: FakeLLM) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:  # noqa: N802
             length = int(self.headers.get("Content-Length", "0"))
             body = json.loads(self.rfile.read(length) or b"{}")
-            text = json.dumps(body.get("messages", []), ensure_ascii=False)
+            text = "\n".join(
+                str(message.get("content", "")) for message in body.get("messages", []) if message.get("role") == "user"
+            )
             marker = llm._marker_in(text)
             mode = llm._next_mode(marker)
             llm._record(LLMCall(marker, mode, body.get("model"), body.get("max_tokens")))
