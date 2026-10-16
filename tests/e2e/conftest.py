@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import socket
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 import netguard
+import synthetic
 from fake_llm import FakeLLM
 from harness import APP_URL, AppServer
 
@@ -30,8 +32,14 @@ def _loopback_only_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def llm_answers() -> dict[str, Any]:
-    """Ответы подставного LLM по маркеру документа. Сценарии переопределяют эту фикстуру."""
-    return {}
+    """Ответы подставного LLM по метке документа (см. synthetic.py)."""
+    return synthetic.llm_answers()
+
+
+@pytest.fixture(scope="session")
+def fixture_paths(tmp_path_factory) -> dict[str, Path]:
+    """Синтетические PNG/PDF во временном каталоге сессии, вне репозитория."""
+    return synthetic.write_all(tmp_path_factory.mktemp("fixtures"))
 
 
 @pytest.fixture
