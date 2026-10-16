@@ -14,7 +14,7 @@ from mail_assistant.operations import (
     unlink_receipt,
 )
 from mail_assistant.report import build_report
-from mail_assistant.storage import MIGRATIONS, Store
+from mail_assistant.storage import MIGRATIONS, SCHEMA_VERSION, Store
 
 ERIP = [{"type": "erip_operation", "value": "123456789"}]
 
@@ -145,7 +145,7 @@ def test_migration_v4_keeps_existing_rows(tmp_path):
     raw.close()
 
     with Store(path) as store:
-        assert store.conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert store.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert store.conn.execute("SELECT COUNT(*) FROM documents WHERE sha256 = 'keep'").fetchone()[0] == 1
         columns = [row[1] for row in store.conn.execute("PRAGMA table_info(receipts)")]
         assert {"operation_id", "purpose", "debit_minor", "is_primary"} <= set(columns)

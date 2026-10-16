@@ -104,3 +104,14 @@ def create_from_labels(store: Store, document_id: int) -> int | None:
     row["warnings"] = list(dict.fromkeys(row["warnings"]))
     result_id = store.save_result(document_id, None, [row])
     return result_id
+
+
+def needing_purpose(store: Store) -> list[int]:
+    """Документы, где назначение действительно отсутствует: без обоснованного назначения и без ручных правок."""
+    rows = store.conn.execute(
+        "SELECT DISTINCT r.document_id FROM receipts r JOIN documents d ON d.id = r.document_id "
+        "WHERE r.is_current = 1 AND d.is_synthetic = 0 AND r.purpose IS NULL AND r.manual_edited = 0 "
+        "AND r.review_status NOT IN ('confirmed', 'rejected') AND d.extracted_text IS NOT NULL "
+        "ORDER BY r.document_id"
+    ).fetchall()
+    return [int(row[0]) for row in rows]

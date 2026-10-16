@@ -334,7 +334,7 @@ def _record_llm_failure(
 
 
 def analyze_document_text(
-    store: Store, document_id: int, ai: AiOptions, *, retry_uncertain: bool = False
+    store: Store, document_id: int, ai: AiOptions, *, retry_uncertain: bool = False, force: bool = False
 ) -> ProcessResult:
     """AI-анализ уже извлечённого текста: без повторного OCR и без чтения почты."""
     document = store.document(document_id)
@@ -345,7 +345,7 @@ def analyze_document_text(
     result = ProcessResult(
         document_id=document_id, sha256=document["sha256"], status=document["status"], duplicate=True
     )
-    if document["status"] == "ai_done":
+    if document["status"] == "ai_done" and not force:
         result.status = "ai_done"
         result.receipt_ids = _current_ids(store, document_id)
         result.text_complete = bool(document["text_complete"])
@@ -356,7 +356,7 @@ def analyze_document_text(
         return result
     return _run_ai(
         store, document_id, document["extracted_text"], bool(document["text_complete"]), ai, result,
-        retry_uncertain, document,
+        retry_uncertain or force, document,
     )
 
 
