@@ -9,6 +9,7 @@ import streamlit as st
 
 from mail_assistant import web_services as svc
 from mail_assistant.config import AppError, load_env_file
+from mail_assistant.operation_view import group_operations, operation_summary_rows, operation_table
 from mail_assistant.presentation import (
     CATEGORY_LABELS, KIND_LABELS, OPERATION_LABELS, PAYMENT_LABELS,
     document_label, issues, money_label, preview_summary, review_label, table_rows,
@@ -136,7 +137,8 @@ with overview:
     st.subheader("Куда ушли деньги")
     st.caption(f"{start:%d.%m.%Y} — {end:%d.%m.%Y} · изменить период: кнопка » в левом верхнем углу.")
     st.markdown("Предварительно: включая непроверенные платежи. Счета без оплаты и возможные дубли исключены.")
-    summary = preview_summary(period_rows, duplicate_ids)
+    operations, bills = group_operations(period_rows)
+    summary = preview_summary(operation_summary_rows(operations), set())
     if not summary:
         st.info("За этот период нет платежей с полной суммой, валютой и датой. Откройте «Проверить записи» или добавьте чеки.")
     for currency, bucket in summary.items():
@@ -157,9 +159,20 @@ with overview:
             st.markdown("**По категориям**")
             st.dataframe([{"Категория": name, "Сумма": money_label({"amount_minor": value, "currency": currency})}
                           for name, value in sorted(bucket["categories"].items(), key=lambda pair: -pair[1])], hide_index=True, width="stretch")
-    st.markdown("### Все документы за период")
-    if period_rows:
-        _receipt_table(period_rows, duplicate_ids)
+    st.markdown("### Платежи и покупки по операциям")
+    st.caption("Несколько документов одной операции показаны внутри неё и не считаются отдельными расходами.")
+    if operations:
+        st.dataframe(operation_table(operations, money_label), hide_index=True, width="stretch")
+        for op in operations:
+            if op["document_count"] > 1:
+                with st.expander(f"{op['recipient']}: документов в операции {op['document_count']}"):
+                    for doc in op["documents"]:
+                        st.write(f"Документ {doc['document_id']} · {doc['review_status']} · {doc['document_kind']}")
+    else:
+        st.info("За период операций нет.")
+    if bills:
+        st.markdown("### Счета без оплаты (не расход)")
+        st.dataframe(operation_table(bills, money_label), hide_index=True, width="stretch")
     invoices = sum(row["document_kind"] == "invoice" and row["payment_status"] != "paid" for row in period_rows)
     if invoices:
         st.info(f"Счетов / начислений без подтверждения оплаты: {invoices}. Они показаны в списке, но не считаются потраченными деньгами.")
