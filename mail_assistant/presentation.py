@@ -26,7 +26,7 @@ def recipient_label(name: str) -> str:
     Different legal forms remain different recipients. Original fields are unchanged.
     """
     text = ' '.join(unicodedata.normalize('NFKC', name).split())
-    if re.search(r'НКФО', text, re.I) and 'ЕРИП' in text.upper():
+    if re.search(r'НКФО.*ЕРИП|АИС\s*Расч', text, re.I):
         return 'Через ЕРИП · поставщик в чеке не указан'
     forms = ((r'закрытое акционерное общество|ЗАО', 'ЗАО'),
              (r'открытое акционерное общество|ОАО', 'ОАО'),
