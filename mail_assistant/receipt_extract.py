@@ -13,6 +13,8 @@ from mail_assistant.money import MoneyError, amount_to_minor, amounts_in_line, n
 from mail_assistant.parser import normalize_for_match, sanitize_for_terminal, truncate_text
 from mail_assistant.receipt_schemas import ReceiptBatch, ReceiptItem
 from mail_assistant.receipt_facts import payment_facts
+from mail_assistant.payment_fields import payment_fields
+from mail_assistant.operations import extract_identifiers
 
 PROMPT_VERSION = "receipt-prompt-2"
 SCHEMA_VERSION = "receipt-schema-2"
@@ -281,8 +283,30 @@ def _verify_item(
     if kind == "unknown" and re.search(r"чек|itogo|кассир|sale", text, re.I):
         kind = "receipt"
 
+    fields = payment_fields(text)
+    if fields["intermediary"] and merchant and fields["intermediary"].lower() in merchant.lower():
+        warnings.append("Получатель в чеке — платёжная система ЕРИП; реальный получатель по документу не указан")
+    warnings.extend(fields["notes"])
+    fee_minor = None
+    if fields["fee_amount"] is not None and currency is not None:
+        fee_minor = amount_to_minor(fields["fee_amount"])
+    debit_minor = None
+    if fields["debit_amount"] is not None and amount_minor is not None:
+        # Отток — итог списания: комиссия уже в нём и не прибавляется повторно.
+        debit_minor = amount_to_minor(fields["debit_amount"])
+    purpose = fields["purpose"][:300] if fields["purpose"] else None
+    description = purpose
+    if purpose and fields["purpose_quote"] and not _in_text(fields["purpose_quote"], haystack):
+        purpose = description = None
+
     return {
         "ordinal": ordinal,
+        "intermediary": fields["intermediary"],
+        "purpose": purpose,
+        "description": description,
+        "fee_minor": fee_minor,
+        "debit_minor": debit_minor,
+        "identifiers": extract_identifiers(text),
         "merchant_name": merchant,
         "merchant_tax_id": tax_id,
         "purchase_date": purchase_date,
