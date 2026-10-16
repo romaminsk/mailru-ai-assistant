@@ -139,10 +139,13 @@ def matches_kind(item: Attachment, kind: str) -> bool:
     return item.mime_type == KIND_TYPES[kind] or item.name.lower().endswith(f".{kind}")
 
 
-def candidate_attachments(meta: bytes, kind: str = "all") -> list[Attachment] | None:
-    """Кандидаты PNG/PDF. None — структуру не удалось разобрать (письмо нужно проверить целиком)."""
+def candidate_attachments(meta: bytes, kind: str = "all", min_bytes: int = 0) -> list[Attachment] | None:
+    """Кандидаты PNG/PDF. None — структуру не удалось разобрать (письмо нужно проверить целиком).
+
+    min_bytes отсекает мелкие иконки рассылок: фото чеков обычно крупнее.
+    """
     try:
         attachments = attachments_from_structure(parse_fetch_structure(meta))
     except StructureError:
         return None
-    return [item for item in attachments if matches_kind(item, kind)]
+    return [item for item in attachments if matches_kind(item, kind) and item.size >= min_bytes]

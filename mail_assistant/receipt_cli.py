@@ -128,6 +128,7 @@ def add_receipt_parsers(commands: Any) -> None:
     sync.add_argument("--local-only", action="store_true", help="только локальный OCR/текст, без LLM")
     sync.add_argument("--max-documents", type=int, default=5, help="лимит новых документов за запуск (1..20)")
     sync.add_argument("--kinds", choices=("pdf", "png", "all"), default="all", help="типы вложений")
+    sync.add_argument("--min-bytes", type=int, default=0, help="пропускать вложения меньше этого размера (иконки)")
     sync.add_argument("--model", default=None)
     sync.add_argument("--max-llm-requests", type=int, default=5)
 
@@ -351,7 +352,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     receipts = load_receipt_settings()
     if args.dry_run:
         with ImapSession(mail, args.mailbox) as session:
-            plan = plan_sync(session, args.received_from, args.received_to, args.max_messages, args.kinds)
+            plan = plan_sync(session, args.received_from, args.received_to, args.max_messages, args.kinds, args.min_bytes)
         print("Dry-run: вложения не загружались, LLM не вызывался, почта не изменена.")
         for line in describe_plan(plan, args.max_messages):
             print(line)
@@ -373,7 +374,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         ai = AiOptions(allow_cloud=False, llm_settings=None, budget=LLMBudget(0))
     ocr = TesseractOcr(receipts.ocr_languages, receipts.ocr_timeout_seconds)
     with Store(receipts.db_path) as store, ImapSession(mail, args.mailbox) as session:
-        plan = plan_sync(session, args.received_from, args.received_to, args.max_messages, args.kinds)
+        plan = plan_sync(session, args.received_from, args.received_to, args.max_messages, args.kinds, args.min_bytes)
         for line in describe_plan(plan, args.max_messages):
             print(line)
         stats = run_sync(session, store, mail.username, plan, receipts, ocr, ai, max_documents=args.max_documents)

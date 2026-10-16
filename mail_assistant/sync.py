@@ -59,7 +59,8 @@ def validate_batch(max_messages: int) -> None:
 
 
 def plan_sync(
-    session: ImapSession, received_from: date, received_to: date, max_messages: int, kind: str = "all"
+    session: ImapSession, received_from: date, received_to: date, max_messages: int, kind: str = "all",
+    min_bytes: int = 0,
 ) -> SyncPlan:
     """Отбор по BODYSTRUCTURE: тела писем и вложения не загружаются.
 
@@ -75,7 +76,7 @@ def plan_sync(
     unknown = 0
     for uid in uids:
         meta = structures.get(uid)
-        found = candidate_attachments(meta, kind) if meta is not None else None
+        found = candidate_attachments(meta, kind, min_bytes) if meta is not None else None
         if found is None:
             unknown += 1
             candidates.append((uid, 0))
@@ -93,7 +94,7 @@ def plan_sync(
     )
 
 
-def candidate_parts(raw: bytes, kind: str = "all") -> list[tuple[int, str, bytes]]:
+def candidate_parts(raw: bytes, kind: str = "all", min_bytes: int = 0) -> list[tuple[int, str, bytes]]:
     """PNG/PDF части письма. Части не открываются как программы и не сохраняются на диск."""
     message = BytesParser(policy=policy.default).parsebytes(raw)
     found: list[tuple[int, str, bytes]] = []
@@ -104,7 +105,7 @@ def candidate_parts(raw: bytes, kind: str = "all") -> list[tuple[int, str, bytes
         if not matches_kind(Attachment(part.get_content_type(), name, 0), kind):
             continue
         payload = part.get_payload(decode=True)
-        if isinstance(payload, bytes) and payload:
+        if isinstance(payload, bytes) and payload and len(payload) >= min_bytes:
             found.append((index, sanitize_for_terminal(name)[:80], payload))
     return found
 
@@ -119,13 +120,14 @@ def run_sync(
     ai: AiOptions,
     max_documents: int = 5,
     kind: str = "all",
+    min_bytes: int = 0,
 ) -> SyncStats:
     stats = SyncStats()
     new_documents = 0
     for uid in plan.selected_uids:
         try:
             raw = session.fetch_message(uid)
-            parts = candidate_parts(raw, kind)
+            parts = candidate_parts(raw, kind, min_bytes)
         except MailError:
             stats.message_errors += 1
             continue
