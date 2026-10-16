@@ -199,6 +199,9 @@ with review:
         current = by_id[choice]
         st.markdown(f"### {money_label(current)}")
         st.write(f"{KIND_LABELS.get(current['document_kind'], 'Документ')} · {review_label(current, duplicate_ids)}")
+        if current["fee_minor"]:
+            fee = money_label({"amount_minor": current["fee_minor"], "currency": current["currency"]})
+            st.write(f"Комиссия: {fee} · уже входит в полный отток, второй раз не добавляется")
         for problem in issues(current):
             st.warning(problem)
         if choice in duplicate_ids:
